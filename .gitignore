@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Skill must never ship secrets, binaries, or per-environment configs.
+# These globs catch the most common accidental commits.
+*.secret
+*.share
+*.eph
+*.pem
+*.key
+qos_client
+qos_client.linux-*
+qos_client.darwin-*
+enclave-keyops.*.json
+!config.prod.example.json
+audit-*.log
+
+# Phase 0 dry-run scratch (skill-split branch only). These directories hold
+# frontmatter drafts and recall-conflict analyses used to decide GO / HYBRID /
+# NO-GO; they MUST stay out of git so the branch contains only real artifacts.
+/skills-draft/
+/phase0-report.md

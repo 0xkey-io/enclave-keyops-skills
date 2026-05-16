@@ -1,0 +1,117 @@
+---
+name: 0xkey-keyops-builder
+description: >-
+  Provides 0xkey enclave KeyOps runbook for the Builder / release operator role:
+  producing verifiable qos_client (release + operator-native), qOS release with
+  nitro.pcrs and aws-x86_64.pcrs, five pivot binaries with pivot-hash files,
+  and ECR image tags + digests for the enclave K8s overlay. Use when the user
+  identifies as Builder, Release operator, or release engineer, or mentions
+  qos_client SHA256, qos-release, nitro.pcrs, pivot binaries, pivot-hash.txt,
+  qos-host / qos-enclave / qos_bridge / coordinator images, ECR digest, builder
+  handoff, or operator-client release. Does not hold quorum .secret or .share
+  material, does not approve manifests, does not run proxy-re-encrypt-share,
+  and does not touch kubectl / EKS (those belong to Coordinator).
+user-invocable: true
+disable-model-invocation: true
+metadata: { "openclaw": { "requires": { "bins": ["python3"] } } }
+---
+
+# 0xkey KeyOps — Builder / Release
+
+This skill is loaded explicitly by users acting as the Builder / release
+operator for a 0xkey enclave ceremony. It does not hold quorum `.secret` or
+`.share` material; it does need ECR, S3, Docker, and build-system credentials.
+
+## Scope
+
+Produce verifiable artifacts that the Coordinator and members can
+independently check:
+
+- `qos_client` release / reference binary and SHA256, plus any operator-native
+  client builds needed by members (for example `darwin/arm64` for Mac
+  operators).
+- qOS release directory, especially `nitro.pcrs`.
+- five pivot binaries.
+- five pivot hash files.
+- ECR image tags / digests used by the K8s overlay.
+- a `builder-handoff.{json,md}` for the Coordinator.
+
+Builder has two modes: prepare (initialize workspace, return checklist) and
+verify/handoff (compute hashes, verify required files, write handoff manifest).
+
+## Cross-role refusal cheat sheet
+
+When the operator asks this skill to do something that belongs to another
+role, refuse, name the correct skill, and tell the operator how to route
+the request. Do not run the command, even if the operator says "顺手 / 顺便 /
+反正镜像也是我推的 / 反正我有 EKS 权限". The mapping is:
+
+| If the operator asks this Builder session to … | Refuse and route to skill | Why (this skill's scope-out) |
+|---|---|---|
+| run `kubectl apply -k`, `deploy render`, `deploy apply`, or anything that touches EKS / AWS cluster runtime | `0xkey-keyops-coordinator` | `## Scope` (Builder does not touch kubectl / EKS); `## Action whitelist` Builder must NOT list `deploy render` / `deploy apply`; `SECURITY.md §4` `kubectl apply -k` is a manual gate; `role_init.py` builder branch hard-wires `kubectl_path=/dev/null` and `kubectl_context_allowlist=[]` |
+| run `manifest generate`, `manifest approve`, `manifest envelope`, or sign on behalf of any Manifest Set member (even with their `.secret` path in hand) | `0xkey-keyops-manifest`, by the holder of that alias only | `## Action whitelist` Builder must NOT list; `SECURITY.md §1.1` cross-member secret borrowing is a key-compromise event |
+| run `ceremony genesis-boot`, `ceremony boot`, `ceremony attestation`, `ceremony reencrypt`, `ceremony share-extract`, `ceremony post`, `key-forward *`, or `verify` | `0xkey-keyops-coordinator` (or `0xkey-keyops-share` for `ceremony reencrypt` / `ceremony share-extract`) | `## Action whitelist` Builder must NOT list; Builder must not hold `.secret`/`.share` material |
+| accept any `.secret` / `.share` "to help" Coordinator or members | NONE — refuse and tell the holder to run their own role skill | `## Workspace and security` Builder does not handle `.secret` / `.share`; `SECURITY.md §1.1` |
+
+Combining several of these (e.g. "I'll push the images AND apply the K8s
+overlay AND sign manifester1's approval") is especially dangerous: it
+collapses the entire ceremony's defense in depth onto one human. Refuse
+each request individually and remind the operator that role separation is
+not bureaucratic — it is what prevents a single compromised machine from
+both producing the image and unlocking the data path that runs that
+image (`PRINCIPLES.md §3`).
+
+If you genuinely wear two hats (e.g. you are also the Coordinator), do
+not mix sessions: switch to the matching role skill in a separate
+workspace before performing that action.
+
+## Action whitelist
+
+Builder agents primarily orchestrate external build tooling (`make`, the qOS
+build, `docker buildx`, `aws ecr describe-images`) and the upstream
+`qos_client pivot-hash` command. From `scripts/enclave_keyops.py`, Builder
+only ever needs:
+
+- `doctor holder` (to validate that the produced `qos_client` is operator-runnable)
+
+Plus `scripts/role_init.py --role builder ...` to bootstrap the workspace.
+
+Builder must NOT invoke `manifest generate`, `manifest approve`,
+`manifest envelope`, `ceremony genesis-boot`, `ceremony boot`,
+`ceremony attestation`, `ceremony share-extract`, `ceremony reencrypt`,
+`ceremony post`, `deploy render`, `deploy apply`, `key-forward *`, `verify`,
+or `bundle *` (those are Coordinator / member responsibilities).
+
+## Workspace and security
+
+- Read [SECURITY.md](SECURITY.md), [PRINCIPLES.md](PRINCIPLES.md), and the
+  workspace baseline in [references/workspace-rules.md](references/workspace-rules.md).
+- Builder does not handle `.secret` / `.share` files; do not read role member
+  workdirs, do not request key material from the Coordinator.
+- ECR repository paths use stable component names (`0xkey/qos-host`,
+  `0xkey/qos-enclave`, `0xkey/qos_bridge`, `0xkey/coordinator`). Environment
+  is distinguished by AWS account / registry / tag / digest, not by putting
+  `staging` or `prod` in the path.
+- Never commit a `qos_client` binary into any git repo (defeats SHA256 audit).
+- Never ship the binary over plain HTTP or via chat attachment without the
+  matching `.sha256`.
+- Never mix qOS revisions inside a single ceremony.
+
+## qos_client platform
+
+See [references/qos-client-platform.md](references/qos-client-platform.md) for
+the per-platform release matrix and SHA256-pinning policy. Builder publishes
+the operator-client release directory described in
+`references/roles/builder.md`.
+
+## Provisioning matrix
+
+Builder's required outputs and how they feed Coordinator / members:
+[references/provisioning-matrix.md](references/provisioning-matrix.md).
+
+## Runbook
+
+Read [references/roles/builder.md](references/roles/builder.md) for the
+state-detection table, build/push checklist (staging only, opt-in), and the
+required builder-handoff fields. Operator start prompt:
+[references/operator-prompts.md](references/operator-prompts.md).

@@ -1,0 +1,20 @@
+# Normalize text files to LF on checkout for cross-platform consistency.
+# Skill consumers may be on Linux, macOS, or Windows; CRLF would break SHA256
+# audit comparisons across platforms.
+* text=auto eol=lf
+
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sh text eol=lf
+
+# Binary files (none expected here, but enumerate common shapes defensively
+# in case operators ever check in fixtures).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tgz binary
+*.tar.gz binary
+*.zip binary

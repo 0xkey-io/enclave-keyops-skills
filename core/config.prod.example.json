@@ -1,0 +1,112 @@
+{
+  "$schema_comment": "复制为 enclave-keyops.<env>.json 后填真实路径；勿提交含秘密的文件。",
+  "qos_client_path": "/ABS/PATH/TO/qos_client",
+  "qos_client_sha256_expected": null,
+  "approval_alias": null,
+
+  "kubectl_context_allowlist": [],
+  "kubectl_path": "kubectl",
+
+  "$kustomize_overlay_path_comment": "MUST be an absolute path to the K8s overlay directory; relative paths are rejected.",
+  "kustomize_overlay_path": "/ABS/PATH/TO/0xkey/repos/enclave/deploy/k8s/overlays/prod",
+  "kubernetes_namespace": "0xkey-enclave",
+
+  "paths": {
+    "workdir_manifest_subdir": "manifest",
+    "qos_release_dir": "ABS_OR_RELATIVE_TO_WORKDIR/qos-release",
+    "pcr3_preimage_path": "ABS_OR_RELATIVE_TO_WORKDIR/pcr3-preimage.txt",
+    "quorum_key_pub_path": "ABS_OR_RELATIVE_TO_WORKDIR/quorum_key.pub",
+    "dr_key_pub_path": "ABS_OR_RELATIVE_TO_WORKDIR/dr-key.pub",
+    "pivots_dir": "ABS_OR_RELATIVE_TO_WORKDIR/pivots",
+    "pivot_hashes_dir": "ABS_OR_RELATIVE_TO_WORKDIR/pivot-hashes",
+    "manifest_set_dir": "manifest/manifest-set",
+    "share_set_dir": "manifest/share-set",
+    "patch_set_dir": "manifest/patch-set",
+    "member_roster_path": "shared/member-roster.json"
+  },
+
+  "defaults": {
+    "restart_policy": "always",
+    "bridge_config_json": "[{\"type\":\"server\",\"port\":8081,\"host\":\"0.0.0.0\"}]",
+    "pivot_args": "[--app-port,8081,--app-listen-host,127.0.0.1]",
+    "tls_fetcher_pivot_args": "[--app-port,8081,--app-listen-host,127.0.0.1,--proxy-cid,3,--proxy-port,9004,--proxy-vsock-to-host,true]",
+    "notarizer_pivot_args": null,
+    "debug_mode_manifest": false,
+    "approve_unsafe_auto_confirm": false
+  },
+
+  "deploy": {
+    "require_context_match": true
+  },
+
+  "verification": {
+    "data_plane_port": 8081,
+    "service_cluster_domain": "svc.cluster.local",
+    "use_kubectl_for_health": true,
+    "jumpbox_pod_label": "",
+    "jumpbox_namespace": ""
+  },
+
+  "services": [
+    {
+      "name": "signer",
+      "deployment_label_app": "signer",
+      "manifest_namespace": "0xkey/signer",
+      "manifest_nonce": null,
+      "host_port_qos": 3001,
+      "endpoint_base_path": null,
+      "pivot_binary_name": "signer",
+      "data_plane_health_path": "/health",
+      "data_plane_post_path": "/v1/signer",
+      "post_share_members_order": null
+    },
+    {
+      "name": "policy-engine",
+      "deployment_label_app": "policy-engine",
+      "manifest_namespace": "0xkey/policy-engine",
+      "manifest_nonce": null,
+      "host_port_qos": 3002,
+      "endpoint_base_path": null,
+      "pivot_binary_name": "policy-engine",
+      "data_plane_health_path": "/health",
+      "data_plane_post_path": "/v1/policy",
+      "post_share_members_order": null
+    },
+    {
+      "name": "notarizer",
+      "deployment_label_app": "notarizer",
+      "manifest_namespace": "0xkey/notarizer",
+      "manifest_nonce": null,
+      "host_port_qos": 3003,
+      "endpoint_base_path": null,
+      "pivot_binary_name": "notarizer",
+      "data_plane_health_path": "/health",
+      "data_plane_post_path": "/v1/notarizer",
+      "post_share_members_order": null
+    },
+    {
+      "name": "tls-fetcher",
+      "deployment_label_app": "tls-fetcher",
+      "manifest_namespace": "0xkey/tls-fetcher",
+      "manifest_nonce": null,
+      "host_port_qos": 3004,
+      "endpoint_base_path": null,
+      "pivot_binary_name": "tls-fetcher",
+      "data_plane_health_path": "/health",
+      "data_plane_post_path": "/v1/fetcher",
+      "post_share_members_order": null
+    },
+    {
+      "name": "transaction-parser",
+      "deployment_label_app": "transaction-parser",
+      "manifest_namespace": "0xkey/transaction-parser",
+      "manifest_nonce": null,
+      "host_port_qos": 3005,
+      "endpoint_base_path": null,
+      "pivot_binary_name": "transaction-parser",
+      "data_plane_health_path": "/health",
+      "data_plane_post_path": "/v1/parser",
+      "post_share_members_order": null
+    }
+  ]
+}
