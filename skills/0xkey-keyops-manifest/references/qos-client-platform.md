@@ -39,3 +39,43 @@ The skill does not ship binaries. Operators receive `qos_client` (and its
 SHA256) from the Coordinator, who forwards the Builder's release-channel URL.
 See `references/roles/builder.md` `Operator-client release channels` for the
 authoritative channel list.
+
+### Recommended channel: GitHub Releases on `0xkey-io/qos`
+
+The default Builder workflow publishes operator-client binaries as a GitHub
+Release on `https://github.com/0xkey-io/qos`, with three integrity layers:
+
+1. Per-platform `.sha256` sidecar next to each `qos_client.<platform>` asset.
+2. A `MANIFEST.json` recording `qos_revision`, `built_at`, `workflow_run_url`,
+   and per-platform `sha256` / `build_method`.
+3. SLSA build provenance attestation (`gh attestation verify`), proving the
+   binary was produced by a specific workflow run on the `0xkey-io/qos`
+   repository.
+
+The skill ships a stdlib helper to consume that channel. From a role
+workspace:
+
+```bash
+# Auto-fetch on first init (records the verified SHA256 in config.json):
+python3 "$SKILL_DIR/scripts/role_init.py" \
+  --role <role> \
+  --root  "$WORKDIR" \
+  --qos-client-release-tag 0xkey-qos_client-vX.Y.Z
+
+# Or fetch standalone (e.g. when the binary needs refreshing later):
+python3 "$SKILL_DIR/scripts/fetch_qos_client.py" \
+  --release-tag 0xkey-qos_client-vX.Y.Z \
+  --out "$WORKDIR/shared/qos_client"
+```
+
+`fetch_qos_client.py` auto-detects the platform via `uname`, downloads the
+binary plus its `.sha256` sidecar, refuses to install on hash mismatch
+(quarantining the bad binary at `<out>.tainted`), and prints a manual
+fallback recipe (curl + `gh release download` + `shasum -a 256 -c`) when
+the network or release path is unreachable. Doctor (`enclave_keyops.py
+doctor *`) detects a missing binary and re-prints the exact `fetch_qos_client.py`
+command but never auto-runs it.
+
+A private mirror of the same release works the same way: pass
+`--repo <org>/<repo>` and export `GH_TOKEN` (or `GITHUB_TOKEN`) in the
+fetch environment.

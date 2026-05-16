@@ -270,11 +270,39 @@ qos-client-release-<qos-revision>/
 
 Trusted channel options, in order of preference:
 
-1. Internal artifact server / S3 with signed URL (IAM-controlled).
-2. ECR as OCI artifact, alongside the enclave images (same trust domain).
-3. GitHub Releases (acceptable for public ceremonies; PAT-gated for private).
-4. Encrypted package + IM/email **only** when the above are unavailable; the
-   recipient must independently verify the SHA256 and qOS revision before use.
+1. **GitHub Releases on `0xkey-io/qos` (default)**. Tag scheme
+   `0xkey-qos_client-vMAJOR.MINOR.PATCH`. The
+   `.github/workflows/0xkey-qos-client-release.yml` workflow on that fork:
+   - builds linux/amd64 via the upstream stagex buildx pipeline (same
+     `make out/qos_client/index.json` target the rest of the qOS release uses,
+     bit-for-bit reproducible with `SOURCE_DATE_EPOCH=1`);
+   - builds darwin/arm64 natively on a `macos-14` runner with
+     `cargo build --release --locked --features smartcard --target aarch64-apple-darwin`
+     (reproducible at the toolchain level: same runner image + `rust-toolchain.toml`
+     + same git tag → same binary, but not byte-for-byte across runner upgrades);
+   - uploads `qos_client.<platform>`, `qos_client.<platform>.sha256`, and
+     `MANIFEST.json` to the release;
+   - generates a SLSA build-provenance attestation (`actions/attest-build-provenance@v2`)
+     so any consumer can verify the binary came from a specific workflow run on
+     `0xkey-io/qos` via `gh attestation verify`.
+
+   Verification is one command per platform:
+
+   ```bash
+   gh release download "$TAG" -R 0xkey-io/qos -p 'qos_client.*' -p 'MANIFEST.json'
+   shasum -a 256 -c qos_client.linux-amd64.sha256
+   shasum -a 256 -c qos_client.darwin-arm64.sha256
+   gh attestation verify qos_client.linux-amd64  -R 0xkey-io/qos
+   gh attestation verify qos_client.darwin-arm64 -R 0xkey-io/qos
+   ```
+
+2. Internal artifact server / S3 with signed URL (IAM-controlled). Use
+   when GitHub Releases are unavailable (e.g. air-gapped network) or for
+   per-customer mirrors.
+3. ECR as OCI artifact, alongside the enclave images (same trust domain).
+4. Encrypted package + IM/email **only** when the above are unavailable;
+   the recipient must independently verify the SHA256 and qOS revision
+   before use.
 
 Hard rules:
 
@@ -287,6 +315,39 @@ Hard rules:
 
 See `SECURITY.md §3` for the trigger table that says **when** Builder must
 re-publish a release.
+
+### builder-handoff schema additions
+
+When channel #1 is used, the `builder-handoff.json` MUST include a
+`qos_client_release` object so Coordinator and members can wire the
+`fetch_qos_client.py` helper without guessing paths:
+
+```jsonc
+{
+  // ... existing fields ...
+  "qos_client_release": {
+    "channel": "github_releases",
+    "repo": "0xkey-io/qos",
+    "tag": "0xkey-qos_client-v0.1.0",
+    "manifest_url":
+      "https://github.com/0xkey-io/qos/releases/download/0xkey-qos_client-v0.1.0/MANIFEST.json",
+    "manifest_sha256": "<hex from MANIFEST.json>",
+    "platforms": {
+      "linux-amd64":  { "sha256": "<hex>", "size": 12345678 },
+      "darwin-arm64": { "sha256": "<hex>", "size": 12345678 }
+    },
+    "qos_revision": "<git-sha-of-fork-build>",
+    "workflow_run_url": "https://github.com/0xkey-io/qos/actions/runs/<id>",
+    "attestation_verify": "gh attestation verify qos_client.<plat> -R 0xkey-io/qos"
+  }
+}
+```
+
+When a non-default channel is used (#2 / #3 / #4), set `channel` accordingly
+and replace `repo` / `tag` / `manifest_url` with the equivalent
+fixed-location URL or storage identifier, plus a published `MANIFEST.json`
+sha256 so consumers can verify the manifest itself before trusting any
+field inside it.
 
 ## Output To User
 

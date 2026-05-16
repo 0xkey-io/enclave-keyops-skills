@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# Local helper. Imported lazily inside main() so that `role_init.py --help`
+# stays usable on machines that don't have the fetch helper for some reason.
+
 
 ROLE_CHOICES = ("coordinator", "manifest-set-member", "share-set-member", "builder")
 DEFAULT_SERVICES = ("signer", "policy-engine", "notarizer", "tls-fetcher", "transaction-parser")
@@ -130,6 +133,11 @@ def configure_json(
     enclave_role_name: str | None,
     qos_client_sha256: str | None,
     kustomize_overlay_path: str | None,
+    # Release-channel metadata. Defaulted to None so callers that predate
+    # the GitHub Releases auto-fetch path keep working without changes.
+    qos_client_release_tag: str | None = None,
+    qos_client_release_repo: str | None = None,
+    qos_client_release_platform: str | None = None,
 ) -> dict[str, Any]:
     data = load_template()
 
@@ -139,10 +147,34 @@ def configure_json(
     # means `doctor holder` checks the right file in both directions without
     # the operator having to remember a `--qos-client-path` override.
     if role == "builder":
-        data["qos_client_path"] = "out/qos_client"
+        # When a release_tag + platform pair is known up front we point
+        # `qos_client_path` at the per-platform copy (`out/qos_client.<plat>`)
+        # because that's the binary Builder will actually execute on this
+        # machine to compute pivot hashes. The bare `out/qos_client` symlink
+        # / copy is the linux-amd64 reference client and may not be runnable
+        # on this host (e.g. macOS arm64 Builder).
+        if qos_client_release_platform:
+            data["qos_client_path"] = f"out/qos_client.{qos_client_release_platform}"
+        else:
+            data["qos_client_path"] = "out/qos_client"
     else:
         data["qos_client_path"] = "shared/qos_client"
     data["qos_client_sha256_expected"] = qos_client_sha256
+
+    # Persist release-tag metadata even if the fetch failed; downstream
+    # `doctor holder` / `doctor coordinator` use this to print a precise,
+    # copy-paste fetch command when the binary is missing.
+    if qos_client_release_tag:
+        data["qos_client_release"] = {
+            "tag": qos_client_release_tag,
+            "repo": qos_client_release_repo or "0xkey-io/qos",
+            "platform": qos_client_release_platform,
+        }
+    else:
+        # Explicit `null` keeps the schema stable across role workspaces;
+        # it also tells `doctor` "no release-channel hint, fall back to
+        # the Builder-handoff link in builder.md".
+        data["qos_client_release"] = None
     data["kubernetes_namespace"] = "0xkey-enclave"
 
     # Single-role workspaces are self-contained: shared/ lives next to inbox/,
@@ -540,6 +572,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--enclave-role-name", default=None)
     p.add_argument("--qos-client-sha256", default=None)
     p.add_argument(
+        "--qos-client-release-tag",
+        default=None,
+        help=(
+            "GitHub release tag for the Builder-published qos_client (e.g. "
+            "0xkey-qos_client-v0.1.0). When set, role_init auto-fetches the "
+            "matching binary into the role workspace and records the verified "
+            "SHA256 in config.json. Omit to keep the existing manual workflow "
+            "(operator drops the binary in by hand)."
+        ),
+    )
+    p.add_argument(
+        "--qos-client-release-repo",
+        default=None,
+        help="GitHub repo for the qos_client release (default: 0xkey-io/qos).",
+    )
+    p.add_argument(
+        "--skip-qos-client-fetch",
+        action="store_true",
+        help=(
+            "Record --qos-client-release-tag in config.json without actually "
+            "downloading the binary. Useful for offline initialization on a "
+            "machine that will receive the binary out-of-band."
+        ),
+    )
+    p.add_argument(
         "--kustomize-overlay-path",
         default=None,
         help="absolute filesystem path to the K8s overlay directory; required for --role coordinator",
@@ -614,6 +671,67 @@ def main() -> None:
         force=ns.force,
     )
 
+    # Auto-fetch the operator client when a release tag is provided.
+    # We resolve platform / out path / fetched sha BEFORE configure_json
+    # so that config.json reflects the binary actually on disk.
+    fetch_failure: str | None = None
+    fetched_platform: str | None = None
+    if ns.qos_client_release_tag and not ns.skip_qos_client_fetch:
+        try:
+            from fetch_qos_client import detect_platform, fetch_binary, FetchError, print_manual_fallback
+        except ImportError as e:  # pragma: no cover - file is shipped alongside this script
+            sys.stderr.write(f"failed to import fetch_qos_client: {e}\n")
+            raise SystemExit(2)
+
+        try:
+            fetched_platform = detect_platform()
+        except FetchError as e:
+            sys.stderr.write(f"qos_client auto-fetch refused: {e}\n")
+            fetch_failure = str(e)
+        else:
+            if ns.role == "builder":
+                target = root / f"out/qos_client.{fetched_platform}"
+            else:
+                target = root / "shared/qos_client"
+            try:
+                digest = fetch_binary(
+                    repo=ns.qos_client_release_repo or "0xkey-io/qos",
+                    tag=ns.qos_client_release_tag,
+                    plat=fetched_platform,
+                    out=target,
+                    expected_sha256=ns.qos_client_sha256,
+                    token=os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+                    timeout=60.0,
+                )
+                ns.qos_client_sha256 = digest
+                print(f"fetched qos_client: {target}")
+                print(f"sha256: {digest}")
+            except FetchError as e:
+                # Init is not blocked by a fetch failure: we still write a
+                # complete role workspace and record the release tag, then
+                # surface a precise fetch command in the todos block. The
+                # SECURITY.md §3 red line is upheld either way — sha
+                # mismatches quarantine the bad download instead of
+                # installing it (see fetch_qos_client.fetch_binary).
+                print_manual_fallback(
+                    reason=str(e).splitlines()[0],
+                    repo=ns.qos_client_release_repo or "0xkey-io/qos",
+                    tag=ns.qos_client_release_tag,
+                    plat=fetched_platform,
+                    out=target,
+                )
+                sys.stderr.write(f"detail:\n{e}\n")
+                fetch_failure = str(e).splitlines()[0]
+    elif ns.qos_client_release_tag and ns.skip_qos_client_fetch:
+        # Operator is fine fetching out-of-band but still wants the tag
+        # recorded. Pre-detect the platform so config.json carries enough
+        # info for `doctor` to print an exact fetch command later.
+        try:
+            from fetch_qos_client import detect_platform, FetchError
+            fetched_platform = detect_platform()
+        except (FetchError, ImportError):
+            fetched_platform = None
+
     cfg = configure_json(
         role=ns.role,
         alias=alias,
@@ -624,6 +742,9 @@ def main() -> None:
         kubectl_context_alias=ns.kubectl_context_alias,
         enclave_role_name=ns.enclave_role_name,
         qos_client_sha256=ns.qos_client_sha256,
+        qos_client_release_tag=ns.qos_client_release_tag,
+        qos_client_release_repo=ns.qos_client_release_repo,
+        qos_client_release_platform=fetched_platform,
         kustomize_overlay_path=ns.kustomize_overlay_path,
     )
     config_path = root / "config.json"
@@ -640,14 +761,43 @@ def main() -> None:
     # are not errors — they are reminders aimed at the agent's next turn so
     # the operator does not get a silently-incomplete workspace.
     todos: list[str] = []
-    if cfg.get("qos_client_sha256_expected") in (None, ""):
+    if fetch_failure:
+        # Construct the same path role_init.py would have written so the
+        # operator can drop the manually-downloaded binary into place
+        # without re-running role_init.
+        if ns.role == "builder" and fetched_platform:
+            target_hint = f"$WORKDIR/out/qos_client.{fetched_platform}"
+        else:
+            target_hint = "$WORKDIR/shared/qos_client"
         todos.append(
-            "qos_client_sha256_expected is null in config.json; populate it "
-            "(via --qos-client-sha256 on a re-init with --force, or by "
-            "editing config.json) AFTER the Coordinator forwards Builder's "
-            "operator-client SHA256. `doctor holder` / `doctor coordinator` "
-            "will fail until this matches the binary at shared/qos_client."
+            f"qos_client auto-fetch failed ({fetch_failure}). Complete the "
+            f"manual fallback printed above (curl + sha256 verify), "
+            f"install the binary at {target_hint}, and re-run role_init "
+            f"with --force --qos-client-sha256 <hex> to record the verified "
+            f"hash in config.json."
         )
+    if cfg.get("qos_client_sha256_expected") in (None, ""):
+        if cfg.get("qos_client_release"):
+            todos.append(
+                "qos_client_sha256_expected is null in config.json; the "
+                "release tag is recorded but the binary is not in place yet. "
+                "Run `python3 $SKILL_DIR/scripts/fetch_qos_client.py "
+                f"--release-tag {ns.qos_client_release_tag} "
+                f"--out {root}/{cfg['qos_client_path']}` to download + "
+                "verify, then re-run role_init with --force "
+                "--qos-client-sha256 <hex> to persist the hash."
+            )
+        else:
+            todos.append(
+                "qos_client_sha256_expected is null in config.json; populate "
+                "it (via --qos-client-sha256 on a re-init with --force, or "
+                "by editing config.json) AFTER the Coordinator forwards "
+                "Builder's operator-client SHA256. `doctor holder` / "
+                "`doctor coordinator` will fail until this matches the "
+                "binary at shared/qos_client. To use the GitHub Releases "
+                "channel instead, pass --qos-client-release-tag <tag> on "
+                "first init."
+            )
     if ns.role == "coordinator":
         dr_placeholder = root / "shared" / "dr-key.pub.PLACEHOLDER"
         if dr_placeholder.exists() and not (root / "shared" / "dr-key.pub").exists():

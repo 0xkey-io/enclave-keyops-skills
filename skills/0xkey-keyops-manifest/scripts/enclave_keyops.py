@@ -410,9 +410,42 @@ def confirm_dangerous(ns: argparse.Namespace, msg: str, phrase: str) -> None:
         raise SystemExit(1)
 
 
+def _qos_client_fetch_hint(cfg: Config) -> str:
+    """Build a copy-paste fetch command when `config.qos_client_release` is set.
+
+    The hint is doctor-mode read-only: it tells the operator EXACTLY which
+    command to run next, but doctor itself never invokes the fetch (that is
+    a setup-phase side effect; doctor is a health probe).
+    """
+    rel = cfg.raw.get("qos_client_release") or {}
+    tag = rel.get("tag")
+    if not tag:
+        return ""
+    fetch_script = script_dir() / "fetch_qos_client.py"
+    repo = rel.get("repo") or "0xkey-io/qos"
+    plat = rel.get("platform")
+    plat_arg = f"--platform {plat} " if plat else ""
+    expected = cfg.raw.get("qos_client_sha256_expected")
+    expected_arg = f"--expected-sha256 {expected} " if expected else ""
+    return (
+        "\n  release-channel hint:\n"
+        f"    python3 {fetch_script} \\\n"
+        f"      --release-tag {tag} \\\n"
+        f"      --repo {repo} \\\n"
+        f"      {plat_arg}--out {cfg.qos_client} \\\n"
+        f"      {expected_arg}\n"
+        "  (doctor stays read-only and does not auto-run this command)\n"
+    )
+
+
 def check_qos_client(cfg: Config) -> None:
     qc = cfg.qos_client
-    require_file(qc, "qos_client")
+    if not qc.is_file():
+        sys.stderr.write(
+            f"missing qos_client: {qc}\n"
+            + _qos_client_fetch_hint(cfg)
+        )
+        raise SystemExit(2)
     if not os.access(qc, os.X_OK):
         sys.stderr.write(f"qos_client not executable: {qc}\n")
         raise SystemExit(1)
@@ -420,7 +453,10 @@ def check_qos_client(cfg: Config) -> None:
     if exp:
         h = sha256_file(qc)
         if h.lower() != str(exp).lower():
-            sys.stderr.write(f"qos_client sha256 mismatch: got {h} expected {exp}\n")
+            sys.stderr.write(
+                f"qos_client sha256 mismatch: got {h} expected {exp}\n"
+                + _qos_client_fetch_hint(cfg)
+            )
             raise SystemExit(1)
         print(f"qos_client sha256 OK: {h}")
 

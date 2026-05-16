@@ -64,6 +64,7 @@ SHARED_FILES: list[tuple[str, str]] = [
     ("config.prod.example.json", "config.prod.example.json"),
     ("scripts/enclave_keyops.py", "scripts/enclave_keyops.py"),
     ("scripts/role_init.py", "scripts/role_init.py"),
+    ("scripts/fetch_qos_client.py", "scripts/fetch_qos_client.py"),
     ("references/operator-prompts.md", "references/operator-prompts.md"),
     ("references/provisioning-matrix.md", "references/provisioning-matrix.md"),
     ("references/qos-client-platform.md", "references/qos-client-platform.md"),

@@ -42,3 +42,12 @@ def load_enclave_keyops() -> ModuleType:
 
 def load_role_init() -> ModuleType:
     return _load("role_init", SCRIPTS / "role_init.py")
+
+
+def load_fetch_qos_client() -> ModuleType:
+    # `role_init.py` does `from fetch_qos_client import ...` lazily, so we
+    # also need the directory on sys.path for that path to resolve in the
+    # role_init integration test.
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    return _load("fetch_qos_client", SCRIPTS / "fetch_qos_client.py")

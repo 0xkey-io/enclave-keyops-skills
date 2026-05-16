@@ -88,6 +88,21 @@
 - 配置里必须填写本角色实际执行的 operator client SHA256；同时在 handoff 中记录它对应的 qOS revision / release digest。
 - `doctor` 失败则禁止继续 manifest / ceremony。
 
+### 3.1 自动 fetch 红线
+
+`scripts/fetch_qos_client.py` 与 `role_init.py --qos-client-release-tag` 提供
+GitHub Releases 自动下载，**但不会绕过 SHA256 校验**。任何"网络抖动重试更
+快"或"先跳过 sha 校验等下次再补"的便利路径都视同破坏门禁：
+
+- 下载来的 `.sha256` 与本地实算 hash 不一致 → 二进制必须**隔离**（脚本写到
+  `<out>.tainted`），绝不安装到 `qos_client_path`，并 `exit 2`。
+- 若 builder-handoff 里另带了独立的 expected SHA256，必须再做第二次比对（
+  `--expected-sha256`）；任一不通过都判失败。
+- 任何形态的"先用着、后面补 sha"流程**不允许**；这一条没有 `--unsafe-...`
+  开关。
+- 自动 fetch 仅运行在 init / 升级 setup 阶段；`doctor` 永远只读，发现 binary
+  缺失也只**打印**可粘贴的 fetch 命令而**不**自执行。
+
 ### qos_client 更换触发表
 
 | 触发 | 谁负责 | 动作 |
