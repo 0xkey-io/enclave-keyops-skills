@@ -25,7 +25,7 @@ import ...` works without packaging metadata.
 | `test_parse_int_list.py` | `enclave_keyops.parse_int_list`, `post_order_for_svc` | `m1,m2` and `1,2,3` parsing; per-svc override > global > default fallback |
 | `test_quorum_threshold.py` | `enclave_keyops.parse_quorum_threshold` | Single-line decimal int format; rejects `=2`, YAML-like, multi-line, comments, `0`, negatives |
 | `test_member_roster.py` | `enclave_keyops.parse_member_roster`, `_check_roster_against_pub_dir` | JSON shape, alias filename-safety + uniqueness, share-set `member_index` 1..N consecutive + bool/zero rejection, `<alias>.pub` ↔ roster alias one-to-one (extras and missing both rejected) |
-| `test_role_init_paths.py` | `role_init.find_enclosing_git_root`, `refuse_under_cwd`, `ENV_PRESETS` | Workspace safety net and the opt-in staging preset table (default env is prod / unspecified) |
+| `test_role_init_paths.py` | `role_init.find_enclosing_git_root`, `refuse_under_cwd` | Workspace safety net for repo-external role workdirs |
 
 ## Notes
 

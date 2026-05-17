@@ -91,7 +91,7 @@ or `bundle *` (those are Coordinator / member responsibilities).
 - ECR repository paths use stable component names (`0xkey/qos-host`,
   `0xkey/qos-enclave`, `0xkey/qos_bridge`, `0xkey/coordinator`). Environment
   is distinguished by AWS account / registry / tag / digest, not by putting
-  `staging` or `prod` in the path.
+  environment names in the path.
 - Never commit a `qos_client` binary into any git repo (defeats SHA256 audit).
 - Never ship the binary over plain HTTP or via chat attachment without the
   matching `.sha256`.
@@ -119,6 +119,6 @@ Builder's required outputs and how they feed Coordinator / members:
 ## Runbook
 
 Read [references/roles/builder.md](references/roles/builder.md) for the
-state-detection table, build/push checklist (staging only, opt-in), and the
+state-detection table, build/push checklist, and the
 required builder-handoff fields. Operator start prompt:
 [references/operator-prompts.md](references/operator-prompts.md).

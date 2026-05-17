@@ -23,22 +23,6 @@ from typing import Any
 ROLE_CHOICES = ("coordinator", "manifest-set-member", "share-set-member", "builder")
 DEFAULT_SERVICES = ("signer", "policy-engine", "notarizer", "tls-fetcher", "transaction-parser")
 
-# Named environment presets. `--env <name>` populates Coordinator-only flags
-# (--account-id / --region / --cluster / --enclave-role-name / --kustomize-overlay-path)
-# unless the operator overrides them on the command line. Add new envs here as
-# new ceremonies are stood up; do NOT change existing entries without lockstep
-# updates to the Genesis manifest and EKS provisioning.
-ENV_PRESETS: dict[str, dict[str, str]] = {
-    "staging": {
-        "account_id": "440744256864",
-        "region": "ap-southeast-1",
-        "cluster": "0xkey-staging",
-        "kubectl_context_alias": "0xkey-staging-default",
-        "enclave_role_name": "0xkey-staging-enclave-node-role",
-    },
-}
-
-
 def skill_dir() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -541,8 +525,8 @@ Expected outputs for Coordinator / members, all under `out/`:
 - `out/pivot-hashes/<service>-pivot-hash.txt` (computed with the same
   `qos_client` produced in this build)
 - `out/images.json` (ECR repo + tag + digest per pushed image, using the
-  stable `0xkey/<component>` repository names — never put `staging`/`prod`
-  in the repo path)
+  stable `0xkey/<component>` repository names — never put environment
+  names in the repo path)
 - `out/builder-handoff.{json,md}` (final handoff to Coordinator)
 
 Hard rules:
@@ -566,17 +550,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--root", required=True, help="role workspace root, outside the source repo")
     p.add_argument("--alias", default=None)
     p.add_argument("--member-index", type=int, default=None)
-    p.add_argument(
-        "--env",
-        default=None,
-        choices=sorted(ENV_PRESETS.keys()),
-        help="opt-in named env preset for Coordinator-only flags. "
-        "Default (omitted) assumes prod or another non-staging env: pass "
-        "--account-id / --region / --cluster / --enclave-role-name "
-        "explicitly. Use --env staging only when the user explicitly says "
-        "they're working on the 0xkey staging cluster.",
-    )
-    # Coordinator-only fields. Required for --role coordinator unless --env supplies them.
+    # Coordinator-only fields. Required for --role coordinator.
     p.add_argument("--account-id", default=None)
     p.add_argument("--region", default=None)
     p.add_argument("--cluster", default=None)
@@ -622,22 +596,6 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def apply_env_preset(ns: argparse.Namespace) -> None:
-    if ns.env is None:
-        return
-    preset = ENV_PRESETS[ns.env]
-    if ns.account_id is None:
-        ns.account_id = preset["account_id"]
-    if ns.region is None:
-        ns.region = preset["region"]
-    if ns.cluster is None:
-        ns.cluster = preset["cluster"]
-    if ns.kubectl_context_alias is None:
-        ns.kubectl_context_alias = preset["kubectl_context_alias"]
-    if ns.enclave_role_name is None:
-        ns.enclave_role_name = preset["enclave_role_name"]
-
-
 def require_coordinator_flags(ns: argparse.Namespace) -> None:
     missing: list[str] = []
     for flag, value in (
@@ -651,7 +609,7 @@ def require_coordinator_flags(ns: argparse.Namespace) -> None:
             missing.append(flag)
     if missing:
         sys.stderr.write(
-            "--role coordinator requires the following flags (or pass --env <preset>): "
+            "--role coordinator requires the following flags: "
             + ", ".join(missing)
             + "\n"
         )
@@ -665,7 +623,6 @@ def require_coordinator_flags(ns: argparse.Namespace) -> None:
 
 def main() -> None:
     ns = build_parser().parse_args()
-    apply_env_preset(ns)
     if ns.role == "coordinator":
         require_coordinator_flags(ns)
     root = expand_abs(ns.root)

@@ -4,10 +4,8 @@ Minimal prompts for users who only know their role and a few path inputs. The
 agent reads the matching `references/roles/<role>.md`, classifies state,
 runs safe commands, and asks only for missing inputs or human gates.
 
-> **Default env is prod (or any non-staging).** Operator prompts and agent
-> replies should NOT mention staging unless the user explicitly says they're
-> working on the 0xkey staging cluster. See coordinator.md for `--env staging`
-> as an opt-in shortcut.
+> **Default env is prod.** Operator prompts should collect explicit environment
+> identifiers instead of relying on hidden presets.
 
 ## Builder
 
@@ -15,8 +13,8 @@ runs safe commands, and asks only for missing inputs or human gates.
 我是 0xkey KeyOps 的 Builder / Release 角色。
 请使用 0xkey-keyops-builder skill，只执行 Builder 角色流程。
 我的工作目录是：<workdir>
-目标环境：<prod | staging>
-AWS account / region：<account-id> / <region>（prod 必填；staging 可不填走预设）
+目标环境：<prod or explicit env name>
+AWS account / region：<account-id> / <region>（必填）
 ECR registry host：<host or unknown>（一般 <account-id>.dkr.ecr.<region>.amazonaws.com）
 我已有的源码目录：repos/enclave=<path or unknown>；repos/services=<path or unknown>
 源码 git ref：repos/enclave=<sha or branch or unknown>；repos/services=<sha or branch or unknown>
@@ -46,7 +44,7 @@ ECR registry host：<host or unknown>（一般 <account-id>.dkr.ecr.<region>.ama
 请使用 0xkey-keyops-manifest skill，只执行 Manifest Set member 角色流程。
 我的工作目录是：<workdir>
 Vault mode（长期私钥的承载形态）：<yubikey | file>
-  （prod 推荐 yubikey；staging/dev 才用 file。见 SECURITY.md §5.1）
+  （prod 推荐 yubikey；只有显式非生产/调试才用 file。见 SECURITY.md §5.1）
 我的 external secret 绝对路径是：<secret-path or unknown or n/a-yubikey>
   （仅在 vault mode = file 时填；yubikey 模式下填 n/a-yubikey）
 我收到的 review bundle 路径是：<path or unknown>
@@ -61,7 +59,7 @@ member-index 是 <n>。
 请使用 0xkey-keyops-share skill，只执行 Share Set member 角色流程。
 我的工作目录是：<workdir>
 Vault mode（长期私钥的承载形态）：<yubikey | file>
-  （prod 推荐 yubikey；staging/dev 才用 file。见 SECURITY.md §5.1）
+  （prod 推荐 yubikey；只有显式非生产/调试才用 file。见 SECURITY.md §5.1）
 我的 external secret 绝对路径是：<path or unknown or n/a-yubikey>
   （成员自有的长期私钥。vault mode = file 时是外部 vault 中的 .secret，例如
    $HOME/0xkey/operator-keys/<alias>/<alias>.secret；yubikey 模式下填 n/a-yubikey）

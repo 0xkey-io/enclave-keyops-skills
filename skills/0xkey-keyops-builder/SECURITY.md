@@ -84,7 +84,7 @@
 - `qos_client` 分两类使用：
   - **release/reference client**：Builder 产出的可验证构建产物，通常是 `linux/amd64`，用于记录 release SHA、容器内 pivot-hash / release 校验等。
   - **operator client**：成员/协调员本机实际执行签名、display、重加密等操作的工具。它必须来自同一 qOS source revision / signed release bundle，但应匹配操作者机器平台（例如 macOS arm64）。
-- 成员在 Mac arm 上不应直接执行 `linux/amd64` `qos_client`。优先提供同 revision 的 native `darwin/arm64` operator client；仅在 staging 或受控环境中使用 `docker run --platform linux/amd64` wrapper，并且容器需固定 image digest、只挂载必要目录、尽量禁用网络。
+- 成员在 Mac arm 上不应直接执行 `linux/amd64` `qos_client`。优先提供同 revision 的 native `darwin/arm64` operator client；仅在受控非生产环境中使用 `docker run --platform linux/amd64` wrapper，并且容器需固定 image digest、只挂载必要目录、尽量禁用网络。
 - 配置里必须填写本角色实际执行的 operator client SHA256；同时在 handoff 中记录它对应的 qOS revision / release digest。
 - `doctor` 失败则禁止继续 manifest / ceremony。
 
@@ -139,15 +139,15 @@
 （`shared/<set>/`）。下表为 0xkey 项目的默认推荐，最终值由 Coordinator 与
 Quorum 集合所有者共同确认：
 
-| 集合 | staging | prod |
-|------|---------|------|
+| 集合 | 小规模演练 | prod |
+|------|------------|------|
 | Manifest Set | 2/3 | 3/5 |
 | Share Set | 2/3 | 4/10 |
 | Patch Set | 可禁用（写 README 说明） | 与 Manifest Set 同档或显式禁用 |
 
 挑选原则：
 - **threshold ≤ ⌈ N/2 ⌉ + 1**：避免极端情况下少数成员就能单边批准。
-- **threshold ≥ 2**：永远不允许单签解锁（除非 staging 单方 dev 演练）。
+- **threshold ≥ 2**：永远不允许单签解锁（除非受控单方调试演练）。
 - 调高 threshold 之前先确保所有 active 成员都能稳定到场；否则 ceremony 会
   因为「一个成员不可达就卡住」而被迫降低标准重做。
 - 集合人数变化（成员离职 / 新增）必须重新签发 manifest 与 share-set；threshold
@@ -181,11 +181,11 @@ Quorum 集合所有者共同确认：
 | 环境   | 推荐 vault                                       | 调用方式                                | 备份策略                                       | 何时可降级 |
 |--------|--------------------------------------------------|-----------------------------------------|------------------------------------------------|-----------|
 | prod   | YubiKey 5 系列 / 同档 HSM（PIV slot，硬件不可导出） | `--yubikey`（passthrough 到 qos_client） | 至少 provision 2 把 YubiKey；丢失走 `key-forward` 重发 | 不允许降级；硬件未就绪应推迟 ceremony |
-| staging| 加密磁盘镜像 / 加密 USB 上的 `.secret` 文件        | `--secret-path /Volumes/<vault>/<alias>.secret` | 一份本地加密备份 + 一份脱机加密备份               | 允许 dev 形态短期演练，但禁止 dev 文件回流到 staging |
-| dev    | 本机加密目录中的 `.secret` 文件                   | `--secret-path ~/0xkey/operator-keys/<alias>/<alias>.secret` | 单份本地备份足够，演练完即销毁                     | 任何 ceremony 改正式用途前必须重新生成 prod key |
+| non-prod rehearsal | 加密磁盘镜像 / 加密 USB 上的 `.secret` 文件 | `--secret-path /Volumes/<vault>/<alias>.secret` | 一份本地加密备份 + 一份脱机加密备份 | 仅限短期演练；不得回流到正式环境 |
+| local dev | 本机加密目录中的 `.secret` 文件 | `--secret-path ~/0xkey/operator-keys/<alias>/<alias>.secret` | 单份本地备份足够，演练完即销毁 | 任何 ceremony 改正式用途前必须重新生成 prod key |
 
 DR 私钥（`dr.secret`）与 Coordinator 的"备份份额持有人"位置同理：prod
-环境**必须**走 YubiKey 或独立 HSM；staging/dev 可以走加密磁盘镜像，但绝
+环境**必须**走 YubiKey 或独立 HSM；非生产/本地调试可以走加密磁盘镜像，但绝
 不与该角色其它 key 同槽位、同备份介质。
 
 ### 5.2 YubiKey 路径下的操作约束

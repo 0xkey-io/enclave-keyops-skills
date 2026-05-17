@@ -89,13 +89,5 @@ class RefuseUnderCwdTests(unittest.TestCase):
         ri.refuse_under_cwd(target, force=True)
 
 
-class EnvPresetTests(unittest.TestCase):
-    def test_staging_preset_exists(self) -> None:
-        self.assertIn("staging", ri.ENV_PRESETS)
-        preset = ri.ENV_PRESETS["staging"]
-        for key in ("account_id", "region", "cluster", "kubectl_context_alias", "enclave_role_name"):
-            self.assertIn(key, preset)
-
-
 if __name__ == "__main__":
     unittest.main()

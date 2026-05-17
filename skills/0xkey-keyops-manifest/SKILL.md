@@ -85,12 +85,12 @@ or Share Set responsibilities).
   - YubiKey PIV slot (prod default) → all commands carry `--yubikey`;
     PIN/PUK is handled by qos_client on its own TTY and is **never**
     quoted in chat, audit log, or this skill's stdout.
-  - external `.secret` file (staging / dev only) → all commands carry
+  - external `.secret` file (non-production / dev only) → all commands carry
     `--secret-path <ext>/<alias>.secret`; the file MUST live outside the
     role workdir and never be read or printed by the agent.
 - `approve-manifest` is a dangerous step requiring a typed confirmation phrase
   (see `SECURITY.md §4`); `--yes` does not bypass it.
-- Do not search `$HOME`, Coordinator workspaces, legacy staging key archives,
+- Do not search `$HOME`, Coordinator workspaces, legacy key archives,
   old ceremony directories, or other member directories for `.secret`, `.pub`,
   or review bundles. If an expected input is absent, stop and ask the user
   where to place it.

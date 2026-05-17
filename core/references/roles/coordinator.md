@@ -53,7 +53,7 @@ round inputs are under:
 - `$WORKDIR/bundles/**`
 - `$WORKDIR/outbox/**` or other output directories created by this role
 
-Do not search `$HOME`, legacy staging key archives, old ceremony directories,
+Do not search `$HOME`, legacy key archives, old ceremony directories,
 Builder outputs, or member workspaces for public keys, quorum keys, shares, or
 bundles unless the user gives an exact path or explicitly authorizes importing
 legacy material.
@@ -82,15 +82,6 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
   --cluster "$EKS_CLUSTER" \
   --enclave-role-name "$ENCLAVE_NODE_ROLE_NAME" \
   --kustomize-overlay-path "$ENCLAVE_OVERLAY_ABSOLUTE_PATH"
-
-# Opt-in shortcut: only when the user explicitly says they're working on
-# 0xkey staging. Default (prod / unspecified): pass the four flags above
-# explicitly and DO NOT pass --env.
-python3 "$SKILL_DIR/scripts/role_init.py" \
-  --role coordinator \
-  --root "$WORKDIR" \
-  --env staging \
-  --kustomize-overlay-path "$ENCLAVE_OVERLAY_ABSOLUTE_PATH"
 ```
 
 Optional `qos_client` flags for non-default situations:
@@ -104,14 +95,9 @@ Optional `qos_client` flags for non-default situations:
   carries the exact `fetch_qos_client.py` command for follow-up.
 
 Notes:
-- The default assumption is **prod** (or any non-staging env). Don't pass
-  `--env` and don't tell the user about the staging preset unless they
-  explicitly say they're working on the 0xkey staging cluster.
+- The default assumption is **prod**.
 - `--account-id`, `--region`, `--cluster`, `--enclave-role-name`, and
-  `--kustomize-overlay-path` are required for `--role coordinator`. `--env
-  staging` is an opt-in shortcut that fills in the first four with the
-  0xkey staging preset; `--kustomize-overlay-path` is operator-specific and
-  always required.
+  `--kustomize-overlay-path` are required for `--role coordinator`.
 - `--kustomize-overlay-path` MUST be an absolute path to the K8s overlay
   directory (e.g. `/Users/you/codes/0xkey/repos/enclave/deploy/k8s/overlays/prod`).
   Relative paths are rejected to keep the skill repo-layout-agnostic.
@@ -184,9 +170,8 @@ Why this matters:
 }
 ```
 
-(Use a neutral `ceremony` id by default. Add an environment qualifier
-like `0xkey-staging-2026q2` only when the user explicitly says they're
-working on staging.)
+(Use a neutral `ceremony` id by default. Add an environment qualifier only
+when the deployment runbook requires one.)
 
 4. Broadcast the roster to all members (signed announcement, IM thread,
    email — anything tamper-evident). Each member confirms their assigned
@@ -250,21 +235,19 @@ these sources:
 - paths explicitly provided by the user in the prompt
 - current-round role workspaces, for example
   `~/0xkey/keyops/manifesterN/out/*.pub` or
-  `~/0xkey/keyops/share-memberN/out/*.pub` (default has no env segment;
-  if user said staging, an extra `/staging/` segment is allowed)
+  `~/0xkey/keyops/share-memberN/out/*.pub`
 - an explicit current-round Coordinator inbox, for example
   `$WORKDIR/inbox/public-keys/<alias>.pub`
 
-Do not broadly search `$HOME`, legacy staging key archives, old ceremony
+Do not broadly search `$HOME`, legacy key archives, old ceremony
 directories, or previous build outputs for `*.pub` and silently import them. If
 such files are found during investigation, report them as possible legacy
 material and ask the user before copying anything into `shared/`.
 
 Public-key validation should check qOS public key shape: 260 hex characters,
 representing two uncompressed SEC1 P-256 points (`04...04...`). Also report
-duplicate public key material across aliases or sets. Duplicate keys are not
-automatically invalid for staging, but require explicit human confirmation before
-the ceremony is treated as ready.
+duplicate public key material across aliases or sets. Duplicate keys require explicit human confirmation before the ceremony is
+treated as ready.
 
 Do not reuse an old `quorum_key.pub` silently. If `quorum_key.pub` comes from a
 previous legacy ceremony, record it as an imported legacy quorum key and ask for
@@ -456,8 +439,8 @@ python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
   --post-global-order "$POST_ORDER"
 ```
 
-For current staging, use the documented order `m2,m1` unless the runbook says
-otherwise.
+Use the documented post-share order from the deployment runbook unless the
+active ceremony config says otherwise.
 
 Verify:
 

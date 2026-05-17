@@ -38,7 +38,7 @@ Builder has two modes:
 - build instructions or release bundle
 - target AWS account / ECR registry
 - output workdir
-- whether this is staging or prod
+- target environment name and release boundary
 
 Do not ask for `.secret` or `.share` files.
 
@@ -73,10 +73,10 @@ inputs rather than guessing from unrelated directories.
 
 Use stable component repository paths such as `0xkey/coordinator`,
 `0xkey/qos-enclave`, and `0xkey/qos_bridge`. Do not put the environment in the
-repository path (for example, do not invent `0xkey-staging/coordinator`). The
-environment boundary is the AWS account / registry plus the release tag and the
-recorded image digest. This keeps staging and prod overlays compatible: prod can
-promote the same component names while changing registry, tag, and digest.
+repository path (for example, do not invent environment-prefixed component
+repositories). The environment boundary is the AWS account / registry plus the
+release tag and the recorded image digest. This keeps overlays compatible across
+environments while changing registry, tag, and digest.
 
 ## Initialize Workspace
 
@@ -178,11 +178,11 @@ Before handing artifacts to the coordinator:
 - compute SHA256 for `qos_client`
 - compute pivot hashes using the same `qos_client`
 - ensure `nitro.pcrs` and `aws-x86_64.pcrs` are present
-- never embed staging secrets into images
+- never embed environment secrets into images
 
 ## Build / Push Checklist (prod, default)
 
-> The default env is **prod** (or any non-staging env). The Builder agent
+> The default env is **prod**. The Builder agent
 > must NOT invent an AWS account / region / registry. Treat these as
 > required inputs to be collected from the org's deployment runbook before
 > any build runs.
@@ -199,7 +199,7 @@ Required fields the operator must supply (record under `metadata/build-config.js
 | `qos_vendored_ref` | `repos/enclave/vendor/qos@<git-sha>` | derived from enclave_repo_ref |
 | `services_repo_ref` | `repos/services@<git-sha>` | operator |
 | `target_platforms[]` | `["linux/amd64", "darwin/arm64"]` | derived from member-roster operator platforms (Coordinator answers) |
-| `tag` | `prod-<yyyymmdd>-<short-sha>` | operator (must encode the release identity, NOT contain `staging`) |
+| `tag` | `prod-<yyyymmdd>-<short-sha>` | operator (must encode the release identity) |
 
 With those fields fixed, a Builder run does:
 
@@ -213,27 +213,12 @@ With those fields fixed, a Builder run does:
 8. Query digests with `aws --region "${aws_region}" ecr describe-images --repository-name 0xkey/<component> --image-ids imageTag=${tag}` and write a unified `out/images.json` (one entry per pushed component).
 9. Write `out/builder-handoff.json` (machine-readable) and `out/builder-handoff.md` (human-readable). Both MUST include every `metadata/build-config.json` field above PLUS: `qos_client.sha256` per platform, all five pivot-hashes, both PCR file hashes, and every image digest from `out/images.json`. Do not ship a handoff that omits any of these.
 
-### Staging shortcut (opt-in)
-
-Only when the user explicitly says they are building for the 0xkey staging
-cluster, the following preset is allowed in place of the prod fields above:
-
-| Field | Staging preset |
-|-------|----------------|
-| `env` | `staging` |
-| `aws_account_id` | `440744256864` |
-| `aws_region` | `ap-southeast-1` |
-| `ecr_registry` | `440744256864.dkr.ecr.ap-southeast-1.amazonaws.com` |
-| `tag` | `staging-<yyyymmdd>-<short-sha>` |
-
-The build / push / handoff steps (1–9) are identical to prod; only the
-field source changes.
 
 On Apple Silicon, a linux/amd64 `qos_client` cannot execute directly. Best
 practice is to ship a small operator-client matrix from the same qOS revision:
 `linux/amd64` for release/reference and cluster/jumpbox use, `darwin/arm64` for
 Mac operators, and optionally `linux/arm64` if operators use ARM Linux. For
-staging, a fixed-digest `docker run --platform linux/amd64` wrapper is acceptable
+non-production rehearsals, a fixed-digest `docker run --platform linux/amd64` wrapper is acceptable
 when a native client is unavailable, but it should mount only the role workdir and
 external key-vault paths needed for the command.
 

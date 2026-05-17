@@ -13,7 +13,7 @@ reading only:
   the current ceremony round
 - exact paths explicitly provided by the user in the prompt
 
-Do **not** broadly search `$HOME`, legacy staging key archives, old ceremony
+Do **not** broadly search `$HOME`, legacy key archives, old ceremony
 directories, previous build outputs, or unrelated role directories to "find"
 key material or bundles. If such files are discovered while diagnosing a
 problem, report them as possible legacy material and ask before importing or

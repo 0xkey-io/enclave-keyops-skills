@@ -25,8 +25,7 @@ Ask for paths, not file contents:
 - optional `qos_client_sha256_expected`: expected SHA256
 - `alias`: e.g. `manifester1`
 - `workdir`: repo-external directory, e.g. `~/0xkey/keyops/manifester1`
-  (默认不带环境分段；如果用户明确说自己在 staging，可以把 `/staging/` 加到
-  这一段做隔离：`~/0xkey/keyops/staging/manifester1`)
+  (默认不带环境分段；如需隔离非生产演练，可按组织 runbook 添加环境分段。)
 
 Never print or request the contents of `.secret`.
 
@@ -50,7 +49,7 @@ provides. For a clean ceremony, accepted inputs are:
 - exact source paths named by the user for copying non-sensitive inputs into the
   workdir
 
-Do not search `$HOME`, Coordinator workspaces, legacy staging key archives, old
+Do not search `$HOME`, Coordinator workspaces, legacy key archives, old
 ceremony directories, or other member directories to find `.secret`, `.pub`, or
 review bundles. If the expected input is absent, stop and tell the user where to
 place it.
@@ -63,8 +62,8 @@ absolute path to the external key location, for example:
 ```
 
 (Default layout has no environment segment — prod is the implicit default.
-If the user explicitly says they're working on staging, insert
-`/staging/` between `operator-keys/` and `<alias>/` for clarity.)
+For non-production rehearsals, add an environment segment only when the
+organization runbook requires it.)
 
 The agent may pass that path to `qos_client` through this skill's script, but
 must never read or print the file contents. Store the public key in
@@ -150,11 +149,11 @@ For alias specifically:
 
 This skill supports two equivalent shapes for the holder credential.
 **Default to the YubiKey path for prod**; only fall back to the file
-path when the user explicitly says staging/dev or hardware is not
+path only for explicit non-production rehearsal or when hardware is not
 available. Never silently switch modes between commands inside one
 session — pick one at first-turn and use it consistently.
 
-| Topic                | YubiKey path (prod preferred)                                 | File path (staging / dev only)                              |
+| Topic                | YubiKey path (prod preferred)                                 | File path (non-production / dev only)                              |
 |----------------------|---------------------------------------------------------------|-------------------------------------------------------------|
 | Generation command   | `key yubikey-provision` (writes `outbox/<alias>.pub`, key stays in PIV slot, never exported) | `key file-generate --master-seed-path <ext>/.secret`        |
 | State evidence (`key-init-needed` cleared) | `outbox/<alias>.pub` present AND user confirmed YubiKey is provisioned for this alias | `outbox/<alias>.pub` present AND external `.secret` exists  |
@@ -219,7 +218,7 @@ Manifest members do not run `kubectl`, but the Coordinator may quote
 
 If the member does not already have a key, this skill supports generating
 one in either a YubiKey PIV slot (prod default) or a file outside
-`$WORKDIR` (staging / dev only). Pick the form that matches what the user
+`$WORKDIR` (non-production / dev only). Pick the form that matches what the user
 declared at first-turn under "Vault mode" — do not silently swap.
 
 **YubiKey path (prod default).** Private key stays on the YubiKey and is
@@ -233,7 +232,7 @@ python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
   --pub-path "outbox/$ALIAS.pub"
 ```
 
-**File path (staging / dev only).** Write the secret outside `$WORKDIR`
+**File path (non-production / dev only).** Write the secret outside `$WORKDIR`
 and only write the public key into this workdir:
 
 ```bash
@@ -288,10 +287,10 @@ Before approving, summarize for the user:
 - pivot hash file names and SHA256
 
 Ask for explicit approval. Do not use `--unsafe-auto-confirm` unless the user
-explicitly says this is staging/test and wants non-interactive approval.
+explicitly says this is non-production/test and wants non-interactive approval.
 
 Run approvals. **Use exactly one** holder-credential flag — either
-`--yubikey` (prod) or `--secret-path <ext>/.secret` (staging / dev).
+`--yubikey` (prod) or `--secret-path <ext>/.secret` (non-production / dev).
 Passing both is a hard error.
 
 YubiKey path:
@@ -307,7 +306,7 @@ for svc in signer policy-engine notarizer tls-fetcher transaction-parser; do
 done
 ```
 
-File path (staging / dev only):
+File path (non-production / dev only):
 
 ```bash
 for svc in signer policy-engine notarizer tls-fetcher transaction-parser; do

@@ -2,12 +2,12 @@
 
 本文件用于后续修改本 skill 时做自检。任何改动若违反这些原则，应先停下来重新设计。
 
-## 1. Staging 先行
+## 1. Prod-like 验证先行
 
-- 新增或修改 CLI 流程后，先在 staging 或 prod-like 环境完成一次非破坏性验证。
+- 新增或修改 CLI 流程后，先在 prod-like 非生产环境完成一次非破坏性验证。
 - 真实生产 ceremony 前，至少验证：`doctor coordinator`、bundle create/extract/verify、五服务 `manifest envelope --dry-run`、`verify --dry-run`。
-- 完整 staging 演练顺序：`doctor coordinator` → staging 配置 `manifest envelope --dry-run` → `bundle create/extract/verify` → staging `verify`。涉及 `deploy apply`、`boot-standard`、`post-share` 前必须单独取得人工确认。
-- 未经 staging 验证的命令不得直接用于生产密钥、manifest 或 K8s apply。
+- 完整演练顺序：`doctor coordinator` → prod-like 配置 `manifest envelope --dry-run` → `bundle create/extract/verify` → `verify`。涉及 `deploy apply`、`boot-standard`、`post-share` 前必须单独取得人工确认。
+- 未经 prod-like 验证的命令不得直接用于生产密钥、manifest 或 K8s apply。
 
 ## 2. 不出现历史命名
 
@@ -67,7 +67,7 @@
   加密邮件、加密 U 盘、私有 git 仓库都是合法实现。
 - 角色 workdir 内的 `inbox/` 与 `outbox/` 目录是**消费者本地落点**，不是跨成员
   的协议路径；发送方不需要知道接收方把 bundle 放在哪个子目录。
-- 任何 staging 实现里的 `coordinator-to-members/<topic>/...` 之类的固定 FS 命名
+- 任何调试实现里的 `coordinator-to-members/<topic>/...` 之类的固定 FS 命名
   不属于 skill 契约，不应作为 skill 文档的默认假设。
 - 如果未来需要为某种渠道引入特殊语义（例如签名邮件附带 PGP 签名），通过新增
   bundle 元数据字段实现，而不是通过约定目录名。

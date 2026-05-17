@@ -237,7 +237,7 @@ flowchart LR
 | 7 | Phase 6 → Phase 7 | **fan-in + 人工门禁** | approvals 数需达 `manifest threshold`；`deploy apply` 需要操作员输入确认短语 |
 | 8 | Phase 7 → Phase 8 | 串行 | Reencrypt 需要 `share-request-*.tgz`（含 attestation doc） |
 | 9 | Phase 8 → Phase 9 | **fan-in 串行** | post-share 需达 `share threshold` 的 wrapped shares |
-| 10 | Phase 9 内五个服务 | **按服务串行**（顺序敏感）| `post-global-order` 已知不能乱（staging 当前为 `m2,m1`）；详见 §6 与 SECURITY.md §6 |
+| 10 | Phase 9 内五个服务 | **按服务串行**（顺序敏感）| `post-global-order` 已知不能乱；详见 §6 与 SECURITY.md §6 |
 
 ---
 
@@ -307,8 +307,8 @@ phase，barrier 本身永远等齐：
 
 ### 6.6 Phase 9 post-share 顺序失败（**最常见的"看似神秘"故障**）
 
-> 已知部分环境 / qOS revision 对 share 接收顺序敏感。Staging 当前已知
-> 工作的顺序是 `m2,m1`。
+> 已知部分环境 / qOS revision 对 share 接收顺序敏感。以当前
+> ceremony 的部署 runbook 或配置记录为准。
 
 | 症状 | 处理 |
 |---|---|
