@@ -44,6 +44,7 @@ import hashlib
 import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE = REPO_ROOT / "core"
@@ -68,6 +69,7 @@ SHARED_FILES: list[tuple[str, str]] = [
     ("references/operator-prompts.md", "references/operator-prompts.md"),
     ("references/provisioning-matrix.md", "references/provisioning-matrix.md"),
     ("references/qos-client-platform.md", "references/qos-client-platform.md"),
+    ("references/release-notes.md", "references/release-notes.md"),
     ("references/workspace-rules.md", "references/workspace-rules.md"),
 ]
 
@@ -122,7 +124,100 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _sync_one(skill_name: str, *, check: bool) -> list[str]:
+def _read_version() -> str:
+    """Read the single-line VERSION file at the repo root.
+
+    The repo-root `VERSION` is the single source of truth for the SemVer
+    string carried in every per-role SKILL.md frontmatter, in CHANGELOG
+    references, and in git tags. Errors here are fatal — we'd rather fail
+    sync than ship a skill with no version line.
+    """
+    raw = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    if not raw:
+        raise RuntimeError("VERSION file is empty")
+    if "\n" in raw or " " in raw:
+        raise RuntimeError(
+            f"VERSION file must contain a single SemVer token, got {raw!r}"
+        )
+    return raw
+
+
+def _sync_skill_version(
+    skill_md: Path, version: str, *, check: bool
+) -> Optional[str]:
+    """Ensure `skill_md`'s YAML frontmatter contains `version: <version>`.
+
+    The frontmatter is hand-written (it carries the per-role description
+    and the agent-skills triggering hints), so we cannot replace the
+    whole file. We do a minimal, pure-string rewrite:
+
+    * Locate the leading `---\\n ... \\n---\\n` block.
+    * If a top-level `version:` line already exists, replace its value.
+    * Otherwise insert `version: <version>` immediately after the
+      mandatory `name:` line so the field appears in the same location
+      every reader expects (compare `~/.agents/skills/lark-base/SKILL.md`).
+
+    In `check` mode we report drift; in write mode we rewrite in place.
+    Returns a drift message or None.
+    """
+    text = skill_md.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        return f"{skill_md.relative_to(REPO_ROOT)}: missing YAML frontmatter"
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        return f"{skill_md.relative_to(REPO_ROOT)}: unterminated YAML frontmatter"
+    fm_block = text[4:end + 1]  # body of frontmatter, ends with newline
+    rest = text[end + 5:]        # everything after the closing `---\n`
+
+    desired = f"version: {version}"
+    fm_lines = fm_block.splitlines()
+    new_fm_lines: list[str] = []
+    found_version = False
+    for line in fm_lines:
+        # Match only top-level `version:` keys (not indented sub-fields).
+        if line.startswith("version:") or line.startswith("version :"):
+            if line.strip() == desired:
+                found_version = True
+                new_fm_lines.append(line)
+            else:
+                if check:
+                    return (
+                        f"{skill_md.relative_to(REPO_ROOT)}: version drift, "
+                        f"expected {desired!r}, got {line.strip()!r}"
+                    )
+                new_fm_lines.append(desired)
+                found_version = True
+        else:
+            new_fm_lines.append(line)
+
+    if not found_version:
+        if check:
+            return (
+                f"{skill_md.relative_to(REPO_ROOT)}: missing top-level "
+                f"{desired!r} in frontmatter"
+            )
+        # Insert just after the `name:` line; that line is mandatory in
+        # the repo's SKILL.md template.
+        for i, line in enumerate(new_fm_lines):
+            if line.startswith("name:"):
+                new_fm_lines.insert(i + 1, desired)
+                break
+        else:
+            new_fm_lines.insert(0, desired)
+
+    new_fm_block = "\n".join(new_fm_lines) + "\n"
+    new_text = "---\n" + new_fm_block + "---\n" + rest
+    if new_text != text:
+        if check:
+            return (
+                f"{skill_md.relative_to(REPO_ROOT)}: SKILL.md frontmatter "
+                "would be rewritten by sync (run sync-skills.py)"
+            )
+        skill_md.write_text(new_text, encoding="utf-8")
+    return None
+
+
+def _sync_one(skill_name: str, *, check: bool, version: str) -> list[str]:
     drift: list[str] = []
     skill_dir = SKILLS / skill_name
     skill_md = skill_dir / "SKILL.md"
@@ -130,6 +225,10 @@ def _sync_one(skill_name: str, *, check: bool) -> list[str]:
     if not skill_md.exists():
         drift.append(f"{skill_name}: missing hand-written SKILL.md")
         return drift
+
+    msg = _sync_skill_version(skill_md, version, check=check)
+    if msg is not None:
+        drift.append(msg)
 
     expected_pairs = _expected_files(skill_name)
 
@@ -212,9 +311,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     ns = _build_parser().parse_args()
+    version = _read_version()
     all_drift: list[str] = []
     for skill_name in ROLES:
-        all_drift.extend(_sync_one(skill_name, check=ns.check))
+        all_drift.extend(_sync_one(skill_name, check=ns.check, version=version))
 
     if all_drift:
         for line in all_drift:
@@ -222,9 +322,9 @@ def main() -> int:
         return 2 if ns.check else 1
 
     if ns.check:
-        print(f"OK: {len(ROLES)} role skills match core/")
+        print(f"OK: {len(ROLES)} role skills match core/ (version {version})")
     else:
-        print(f"synced {len(ROLES)} role skills from core/")
+        print(f"synced {len(ROLES)} role skills from core/ (version {version})")
     return 0
 
 

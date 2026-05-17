@@ -1,5 +1,6 @@
 ---
 name: 0xkey-keyops-builder
+version: 0.2.0
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Builder / release operator role:
   producing verifiable qos_client (release + operator-native), qOS release with
@@ -115,6 +116,21 @@ in-ceremony version pin rule.
 
 Builder's required outputs and how they feed Coordinator / members:
 [references/provisioning-matrix.md](references/provisioning-matrix.md).
+
+## Version & update
+
+This skill is version `0.2.0` (see the frontmatter at the top of this
+file). Release notes and migration steps are in
+[references/release-notes.md](references/release-notes.md). Always read
+the entry for the version you are upgrading **into** before running any
+ceremony commands — a BREAKING release may require a `role_init.py
+--force` migration.
+
+Check the latest published version with `gh release view -R
+0xkey-io/enclave-keyops-skills` (or, on a `git clone` install,
+`git -C <skill-src> ls-remote --tags origin | tail -1`). Upgrade with
+`npx skills update 0xkey-keyops-builder` (npm-style install) or
+`git -C <skill-src> pull --tags` (clone install).
 
 ## Runbook
 

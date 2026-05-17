@@ -1,5 +1,6 @@
 ---
 name: 0xkey-keyops-coordinator
+version: 0.2.0
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Deployment Coordinator role:
   generating canonical five-service manifests, running boot-genesis /
@@ -104,6 +105,23 @@ ceremony, one `qos_client` revision), and the prerelease fallback.
   plus outer `.tgz.sha256`, with `BUNDLE.json` and `SHA256SUMS` inside. How the
   bundle travels (shared FS, S3, IM with file attachment, encrypted email,
   encrypted USB, private git repo) is the operator's choice.
+
+## Version & update
+
+This skill is version `0.2.0` (see the frontmatter at the top of this
+file). Release notes and migration steps are in
+[references/release-notes.md](references/release-notes.md). Always read
+the entry for the version you are upgrading **into** before running any
+ceremony commands — a BREAKING release may require a `role_init.py
+--force` migration. The Coordinator should also broadcast the new
+version (and any migration step) to the Manifest / Share / Builder
+members before they upgrade their own role workspaces.
+
+Check the latest published version with `gh release view -R
+0xkey-io/enclave-keyops-skills` (or, on a `git clone` install,
+`git -C <skill-src> ls-remote --tags origin | tail -1`). Upgrade with
+`npx skills update 0xkey-keyops-coordinator` (npm-style install) or
+`git -C <skill-src> pull --tags` (clone install).
 
 ## Runbook
 

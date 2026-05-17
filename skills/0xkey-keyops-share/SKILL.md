@@ -1,5 +1,6 @@
 ---
 name: 0xkey-keyops-share
+version: 0.2.0
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Share Set member role:
   verifying a Coordinator-issued share-request bundle, running
@@ -116,6 +117,21 @@ hash. When the Coordinator pins a specific tag for this ceremony, pass
 for the operator-client matrix and the prerelease fallback. On macOS
 arm64 the auto-fetch picks `qos_client.darwin-arm64`; do not require the
 member to execute a `linux/amd64` release binary directly.
+
+## Version & update
+
+This skill is version `0.2.0` (see the frontmatter at the top of this
+file). Release notes and migration steps are in
+[references/release-notes.md](references/release-notes.md). Always read
+the entry for the version you are upgrading **into** before running any
+ceremony commands — a BREAKING release may require a `role_init.py
+--force` migration.
+
+Check the latest published version with `gh release view -R
+0xkey-io/enclave-keyops-skills` (or, on a `git clone` install,
+`git -C <skill-src> ls-remote --tags origin | tail -1`). Upgrade with
+`npx skills update 0xkey-keyops-share` (npm-style install) or
+`git -C <skill-src> pull --tags` (clone install).
 
 ## Runbook
 
