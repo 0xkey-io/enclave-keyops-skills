@@ -65,6 +65,13 @@ legacy material.
 > placeholder before invoking Python and do not hardcode `.cursor/skills/...`,
 > `.codex/skills/...`, etc.
 
+By default `role_init.py` resolves and downloads the latest stable
+`qos_client` from `0xkey-io/qos` GitHub Releases (skipping prereleases),
+verifies the SHA256 against the published sidecar, and installs the
+binary at `$WORKDIR/shared/qos_client`. The Coordinator does not have to
+remember a hash for first-init; the runtime SHA256 lands in
+`config.json.qos_client_sha256_expected` automatically.
+
 ```bash
 # Explicit form (works for any environment):
 python3 "$SKILL_DIR/scripts/role_init.py" \
@@ -74,8 +81,7 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
   --region "$AWS_REGION" \
   --cluster "$EKS_CLUSTER" \
   --enclave-role-name "$ENCLAVE_NODE_ROLE_NAME" \
-  --kustomize-overlay-path "$ENCLAVE_OVERLAY_ABSOLUTE_PATH" \
-  --qos-client-sha256 "$QOS_CLIENT_SHA256"
+  --kustomize-overlay-path "$ENCLAVE_OVERLAY_ABSOLUTE_PATH"
 
 # Opt-in shortcut: only when the user explicitly says they're working on
 # 0xkey staging. Default (prod / unspecified): pass the four flags above
@@ -84,9 +90,18 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
   --role coordinator \
   --root "$WORKDIR" \
   --env staging \
-  --kustomize-overlay-path "$ENCLAVE_OVERLAY_ABSOLUTE_PATH" \
-  --qos-client-sha256 "$QOS_CLIENT_SHA256"
+  --kustomize-overlay-path "$ENCLAVE_OVERLAY_ABSOLUTE_PATH"
 ```
+
+Optional `qos_client` flags for non-default situations:
+
+- `--qos-client-release-tag <tag>` — pin a specific release (e.g.
+  `0xkey-qos_client-v0.1.0`) instead of resolving `latest`. Use this
+  when ceremony lock requires a specific Builder revision; communicate
+  the same tag to all members.
+- `--qos-client-release-repo <owner/name>` — point at a private mirror.
+- `--no-qos-client-fetch` — scaffold offline; the printed todo line
+  carries the exact `fetch_qos_client.py` command for follow-up.
 
 Notes:
 - The default assumption is **prod** (or any non-staging env). Don't pass
@@ -267,7 +282,7 @@ Before running commands, inspect only `$WORKDIR` and classify:
 | State | Directory evidence | Next action |
 |-------|--------------------|-------------|
 | `uninitialized` | missing `config.json` | run `role_init.py` with account/region/cluster |
-| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | tell user to ask Builder for the operator-client release for this platform (binary + SHA256 + qOS revision); do not download from random sources, do not reuse a different ceremony's binary |
+| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `role_init.py` (default = auto-fetch latest from `0xkey-io/qos`, the same channel Builder publishes to); on offline machines run `python3 $SKILL_DIR/scripts/fetch_qos_client.py --release-tag latest --out $WORKDIR/shared/qos_client`, then re-run `role_init.py --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
 | `missing-roster` | no `shared/member-roster.json` or it doesn't list every set member | publish or update the roster (see `Alias / member-index assignment`); members must not submit `.pub` files until roster exists |
 | `collecting-genesis-materials` | roster published but missing current-round public-key sets, `quorum_threshold`, PCR3 preimage, or `shared/dr-key.pub` | ask for exact member `.pub` paths (filename = roster alias + `.pub`), the DR public key, or current-round inbox files |
 | `waiting-for-builder-artifacts` | public-key sets exist, missing qOS PCR, pivots, pivot hashes, or images.json | ask Builder for handoff artifacts |

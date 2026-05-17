@@ -2,12 +2,18 @@
 
 These tests stand up a tiny local `http.server` to serve a fake GitHub
 release directory (`/<repo>/releases/download/<tag>/qos_client.<plat>` and
-`.sha256`). All network requests stay on `127.0.0.1`, so the suite has no
-external dependencies and is safe to run in CI.
+`.sha256`) plus the matching REST API endpoints
+(`/repos/<repo>/releases/latest`, `/repos/<repo>/releases?per_page=1`). All
+network requests stay on `127.0.0.1`, so the suite has no external
+dependencies and is safe to run in CI.
 
 Coverage:
 
 * `detect_platform` recognizes the supported uname pairs and refuses unknowns.
+* `resolve_release_tag` resolves the `latest` sentinel via the GitHub REST
+  API, falls back to the most recent prerelease when no stable release
+  exists yet (and emits a stderr WARN), and passes explicit tags through
+  unchanged.
 * Successful fetch installs the binary at `--out` with mode 0755 and writes
   the matching `.sha256` sidecar.
 * SHA mismatch (downloaded `.sha256` disagrees with the binary) quarantines
@@ -21,7 +27,9 @@ from __future__ import annotations
 
 import http.server
 import io
+import json
 import socketserver
+import sys
 import threading
 import unittest
 from contextlib import contextmanager
@@ -164,15 +172,45 @@ PLAT = "linux-amd64"
 BIN_BODY = b"\x7fELF<imagine-this-is-qos_client>" * 32
 
 
-def _fake_assets(*, plat: str = PLAT, sha_override: bytes | None = None) -> dict[str, bytes]:
+def _fake_assets(
+    *,
+    plat: str = PLAT,
+    sha_override: bytes | None = None,
+    tag: str = TAG,
+) -> dict[str, bytes]:
+    """Build the asset URL → bytes map served by the local fake release server.
+
+    Includes both the `releases/download/<tag>/...` binary + sidecar and the
+    matching REST API endpoint (`/repos/<repo>/releases/latest`) so a single
+    server can satisfy both `resolve_release_tag` and `fetch_binary`.
+    """
     import hashlib
     sha = hashlib.sha256(BIN_BODY).hexdigest()
     sha_line = sha_override if sha_override is not None else f"{sha}  qos_client.{plat}\n".encode()
-    base = f"/{REPO}/releases/download/{TAG}/qos_client.{plat}"
+    base = f"/{REPO}/releases/download/{tag}/qos_client.{plat}"
+    api_latest = f"/repos/{REPO}/releases/latest"
+    api_list = f"/repos/{REPO}/releases?per_page=1"
     return {
         base: BIN_BODY,
         f"{base}.sha256": sha_line,
+        api_latest: json.dumps({"tag_name": tag, "prerelease": False}).encode(),
+        api_list: json.dumps([{"tag_name": tag, "prerelease": False}]).encode(),
     }
+
+
+@contextmanager
+def patch_github_api_base(base_url: str) -> Iterator[None]:
+    """Redirect `fc.GITHUB_API_BASE` at the local fake server for the duration
+    of the with-block. Required by every test that exercises
+    `resolve_release_tag` since that path uses the REST API URL directly
+    (it is not routed through `asset_urls`).
+    """
+    original = fc.GITHUB_API_BASE
+    fc.GITHUB_API_BASE = base_url
+    try:
+        yield
+    finally:
+        fc.GITHUB_API_BASE = original
 
 
 class FetchBinaryE2ETests(unittest.TestCase):
@@ -319,6 +357,77 @@ class ManualFallbackTests(unittest.TestCase):
             )
         text = captured.getvalue()
         self.assertIn("qos_client.<platform>", text)
+
+
+# ---------------------------------------------------------------------------
+# resolve_release_tag — covers the `latest` default that role_init.py relies
+# on so first-init "just works" without the operator picking a tag.
+# ---------------------------------------------------------------------------
+
+
+class ResolveReleaseTagTests(unittest.TestCase):
+    def test_explicit_tag_is_returned_verbatim_without_network(self) -> None:
+        # A non-"latest" value never hits the REST API; the function must
+        # return the input string unchanged.
+        out = fc.resolve_release_tag(
+            REPO, want="0xkey-qos_client-v9.9.9", token=None, timeout=5.0
+        )
+        self.assertEqual(out, "0xkey-qos_client-v9.9.9")
+
+    def test_default_resolves_via_releases_latest_endpoint(self) -> None:
+        with fake_release(_fake_assets()) as base:
+            with patch_github_api_base(base):
+                # `want=None` is the role_init.py default path.
+                resolved = fc.resolve_release_tag(
+                    REPO, want=None, token=None, timeout=5.0
+                )
+        self.assertEqual(resolved, TAG)
+
+    def test_literal_latest_string_resolves_same_as_none(self) -> None:
+        with fake_release(_fake_assets()) as base:
+            with patch_github_api_base(base):
+                resolved = fc.resolve_release_tag(
+                    REPO, want=fc.LATEST_TAG, token=None, timeout=5.0
+                )
+        self.assertEqual(resolved, TAG)
+
+    def test_falls_back_to_prerelease_when_no_stable_exists(self) -> None:
+        # Mimic GitHub when only RC tags have been published: /releases/latest
+        # returns 404, but /releases?per_page=1 returns the most recent
+        # prerelease. The function must return that prerelease tag and emit a
+        # stderr WARN so the operator notices.
+        rc_tag = "0xkey-qos_client-v0.1.0-rc1"
+        assets: dict[str, bytes] = {
+            f"/repos/{REPO}/releases?per_page=1": json.dumps(
+                [{"tag_name": rc_tag, "prerelease": True}]
+            ).encode(),
+            # Note: no /releases/latest entry → server returns 404.
+        }
+        captured = io.StringIO()
+        with fake_release(assets) as base:
+            with patch_github_api_base(base):
+                with mock.patch.object(sys, "stderr", captured):
+                    resolved = fc.resolve_release_tag(
+                        REPO, want=None, token=None, timeout=5.0
+                    )
+        self.assertEqual(resolved, rc_tag)
+        self.assertIn("WARN", captured.getvalue())
+        self.assertIn(rc_tag, captured.getvalue())
+
+    def test_no_releases_at_all_raises(self) -> None:
+        # Fresh repo: neither /releases/latest nor /releases?per_page=1
+        # return anything useful. We must surface a clear error rather
+        # than silently picking an empty tag.
+        assets: dict[str, bytes] = {
+            f"/repos/{REPO}/releases?per_page=1": b"[]",
+        }
+        with fake_release(assets) as base:
+            with patch_github_api_base(base):
+                with self.assertRaises(fc.FetchError) as cm:
+                    fc.resolve_release_tag(
+                        REPO, want=None, token=None, timeout=5.0
+                    )
+        self.assertIn("no releases", str(cm.exception))
 
 
 if __name__ == "__main__":

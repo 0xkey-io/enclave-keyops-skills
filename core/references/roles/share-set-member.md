@@ -84,14 +84,27 @@ must never read or print the file contents. Store the public key in
 > filesystem. The agent that loaded this skill already knows it; resolve the
 > placeholder before invoking Python.
 
+By default `role_init.py` resolves and downloads the latest stable
+`qos_client` from `0xkey-io/qos` GitHub Releases (skipping prereleases),
+verifies the SHA256 against the published sidecar, and installs the
+binary at `$WORKDIR/shared/qos_client`. The operator does not have to
+remember a hash.
+
 ```bash
 python3 "$SKILL_DIR/scripts/role_init.py" \
   --role share-set-member \
   --root "$WORKDIR" \
   --alias "$ALIAS" \
-  --member-index "$MEMBER_INDEX" \
-  --qos-client-sha256 "$QOS_CLIENT_SHA256"
+  --member-index "$MEMBER_INDEX"
 ```
+
+Optional flags for non-default situations:
+
+- `--qos-client-release-tag <tag>` to pin a specific release tag for
+  this ceremony instead of resolving `latest`.
+- `--qos-client-release-repo <owner/name>` to point at a private mirror.
+- `--no-qos-client-fetch` to scaffold offline; the printed todo line
+  carries the exact `fetch_qos_client.py` command to run later.
 
 Then ensure:
 
@@ -135,9 +148,12 @@ For alias / member_index specifically:
   pick. Use "Coordinator 分配给你的 alias (来自 `member-roster.json`)；
   如果不知道请先去问 Coordinator".
 - ❌ Don't say "or you can drop it at .../shared/qos_client" without first
-  saying where it comes from. Use "向 Coordinator 索取本 ceremony 的
-  operator-client 包 (binary + SHA256 + qOS revision)；不要从公网下载，
-  也不要复用其他 ceremony 的旧 binary，然后告诉我落在哪个绝对路径".
+  saying where it comes from. The default workflow is `role_init.py`
+  auto-fetching the latest stable release from `0xkey-io/qos` (verified
+  SHA256). If the Coordinator has pinned a specific tag for this
+  ceremony, pass it as `--qos-client-release-tag <tag>`; never instruct
+  the user to grab a binary from a random mirror or to reuse another
+  ceremony's binary.
 - For the missing `.share` case: explicitly mention "如果没有 .share，说明
   是首次 ceremony，agent 会走 genesis-output → share-extract 分支".
 
@@ -209,7 +225,7 @@ Before running commands, inspect only `$WORKDIR` and classify the state.
 |-------|--------------------|-------------|
 | `uninitialized` | missing `config.json` | run `role_init.py` for this alias/member index — but only if `waiting-for-roster` is NOT also active (see precedence rule above) |
 | `waiting-for-roster` | user said `<alias>` or `<n>` is `unknown`, OR alias/index does not appear in any received `BUNDLE.json.members.share_set` slice, OR no Coordinator-issued roster has been provided yet | ask Coordinator for the assigned alias and member-index from `member-roster.json`; do not let the user pick values themselves (collisions break Genesis irreversibly); do not bake the user-claimed pair into `config.json` |
-| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | tell user to ask Coordinator to forward the Builder's operator-client release for this platform (binary + SHA256 + qOS revision); do not download from random sources, do not reuse a different ceremony's binary |
+| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `role_init.py` (default = auto-fetch latest from `0xkey-io/qos`); on offline machines run `python3 $SKILL_DIR/scripts/fetch_qos_client.py --release-tag latest --out $WORKDIR/shared/qos_client` and then re-run `role_init.py --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
 | `key-init-needed` | missing `outbox/<alias>.pub`; for file mode also missing external `.secret` path | YubiKey path: confirm slot is provisioned and run `key yubikey-provision`. File path: propose `$HOME/0xkey/operator-keys/<env>/<alias>/<alias>.secret` and run `key file-generate` after confirmation. (See "Vault mode" above.) |
 | `waiting-for-genesis-output-bundle` | has the chosen holder credential (YubiKey OR external `.secret`) AND `outbox/<alias>.pub`, missing `inbox/genesis-output-*.tgz` and missing external `.share` (cannot precede `key-init-needed` — `ceremony share-extract` needs `--yubikey` OR `--secret-path`) | ask Coordinator to send the Genesis-output bundle |
 | `ready-to-extract-share` | has `shared/qos_client`, the chosen holder credential, and `inbox/genesis-output-*.tgz` | run `bundle extract`, `bundle verify`, then `ceremony share-extract` (with `--yubikey` OR `--secret-path`) to write `.share` to the external key vault |

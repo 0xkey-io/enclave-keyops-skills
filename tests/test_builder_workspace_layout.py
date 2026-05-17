@@ -239,22 +239,28 @@ class RoleInitStdoutHints(unittest.TestCase):
         finally:
             __import__("sys").argv = old_argv
 
-    def test_qos_client_null_emits_todo(self) -> None:
+    def test_no_qos_client_fetch_emits_todo(self) -> None:
+        # `--no-qos-client-fetch` is the offline init switch. We expect a
+        # follow-up todo that prints the exact `fetch_qos_client.py`
+        # invocation the operator should run later.
         out = self._run_main(
             "--role", "manifest-set-member",
             "--root", str(self.tmp / "manifester1"),
             "--alias", "manifester1",
+            "--no-qos-client-fetch",
         )
-        self.assertIn("qos_client_sha256_expected", out)
-        self.assertRegex(
-            out,
-            r"todo \d+:.*qos_client_sha256_expected",
-        )
+        self.assertIn("--no-qos-client-fetch", out)
+        # The follow-up command may break across lines; use DOTALL via (?s).
+        self.assertRegex(out, r"(?s)todo \d+:.*fetch_qos_client\.py")
+        self.assertIn("--release-tag latest", out)
 
     def test_builder_emits_build_config_todo(self) -> None:
+        # We pass --no-qos-client-fetch so this unit test never reaches the
+        # network (ri.main() default = auto-fetch latest from GitHub).
         out = self._run_main(
             "--role", "builder",
             "--root", str(self.tmp / "builder"),
+            "--no-qos-client-fetch",
         )
         self.assertRegex(
             out,
@@ -262,6 +268,8 @@ class RoleInitStdoutHints(unittest.TestCase):
         )
 
     def test_coordinator_emits_dr_and_roster_todos(self) -> None:
+        # Same story — coordinator init is unrelated to qos_client fetch
+        # in this test, so we keep the run offline.
         out = self._run_main(
             "--role", "coordinator",
             "--root", str(self.tmp / "coordinator"),
@@ -270,6 +278,7 @@ class RoleInitStdoutHints(unittest.TestCase):
             "--cluster", "0xkey-test",
             "--enclave-role-name", "0xkey-test-enclave-node-role",
             "--kustomize-overlay-path", "/abs/path/overlays/prod",
+            "--no-qos-client-fetch",
         )
         self.assertIn("dr-key.pub", out)
         self.assertIn("member-roster.json", out)

@@ -411,28 +411,33 @@ def confirm_dangerous(ns: argparse.Namespace, msg: str, phrase: str) -> None:
 
 
 def _qos_client_fetch_hint(cfg: Config) -> str:
-    """Build a copy-paste fetch command when `config.qos_client_release` is set.
+    """Build a copy-paste fetch command for re-installing the qos_client.
 
     The hint is doctor-mode read-only: it tells the operator EXACTLY which
     command to run next, but doctor itself never invokes the fetch (that is
-    a setup-phase side effect; doctor is a health probe).
+    a setup-phase side effect; doctor is a health probe). When config.json
+    carries no `qos_client_release` block (legacy workspace), the hint
+    still falls back to the documented "latest from 0xkey-io/qos" default
+    so the operator never has to hunt for syntax.
     """
     rel = cfg.raw.get("qos_client_release") or {}
-    tag = rel.get("tag")
-    if not tag:
-        return ""
     fetch_script = script_dir() / "fetch_qos_client.py"
     repo = rel.get("repo") or "0xkey-io/qos"
+    # Prefer the concrete tag we resolved at init time so re-fetches are
+    # reproducible; fall back to whatever the operator typed (often the
+    # literal "latest"), and finally to the "latest" sentinel — which is
+    # exactly what role_init.py uses by default.
+    tag = rel.get("resolved_tag") or rel.get("tag") or "latest"
     plat = rel.get("platform")
     plat_arg = f"--platform {plat} " if plat else ""
     expected = cfg.raw.get("qos_client_sha256_expected")
     expected_arg = f"--expected-sha256 {expected} " if expected else ""
+    repo_arg = f"--repo {repo} " if repo != "0xkey-io/qos" else ""
     return (
         "\n  release-channel hint:\n"
         f"    python3 {fetch_script} \\\n"
         f"      --release-tag {tag} \\\n"
-        f"      --repo {repo} \\\n"
-        f"      {plat_arg}--out {cfg.qos_client} \\\n"
+        f"      {repo_arg}{plat_arg}--out {cfg.qos_client} \\\n"
         f"      {expected_arg}\n"
         "  (doctor stays read-only and does not auto-run this command)\n"
     )

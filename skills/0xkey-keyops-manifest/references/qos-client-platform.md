@@ -35,15 +35,59 @@ A single ceremony **must not** swap `qos_client` mid-flight: `boot-genesis`
 
 ## Where to obtain `qos_client`
 
-The skill does not ship binaries. Operators receive `qos_client` (and its
-SHA256) from the Coordinator, who forwards the Builder's release-channel URL.
-See `references/roles/builder.md` `Operator-client release channels` for the
-authoritative channel list.
+The default Builder workflow publishes operator-client binaries as a
+GitHub Release on `https://github.com/0xkey-io/qos`, and the skill is
+wired so the operator does not have to think about that URL: `role_init.py`
+auto-fetches the latest stable release on first init, verifies SHA256
+against the published sidecar, and writes the verified hash into
+`config.json.qos_client_sha256_expected`.
 
-### Recommended channel: GitHub Releases on `0xkey-io/qos`
+### Default first-init (recommended)
 
-The default Builder workflow publishes operator-client binaries as a GitHub
-Release on `https://github.com/0xkey-io/qos`, with three integrity layers:
+```bash
+# Resolves "latest stable" via GitHub's /releases/latest API, downloads
+# qos_client.<host-platform>, verifies SHA256, installs at the role-correct
+# path, and records the release tag + verified hash in config.json.
+python3 "$SKILL_DIR/scripts/role_init.py" \
+  --role <role> \
+  --root "$WORKDIR" \
+  ...role-specific flags...
+```
+
+What "latest" means here: GitHub's `/releases/latest` endpoint returns the
+most recent **non-draft, non-prerelease** release. If `0xkey-io/qos` has
+not published a stable release yet (only RC tags exist), `role_init.py`
+falls back to the most recent prerelease and emits a stderr WARN — that
+is the signal to ask Builder for a stable release before running a
+production ceremony.
+
+### Pin a specific release (ceremony lock)
+
+When the ceremony rules require a specific qOS revision, the Coordinator
+chooses the tag and every member uses the same one:
+
+```bash
+python3 "$SKILL_DIR/scripts/role_init.py" \
+  --role <role> --root "$WORKDIR" \
+  --qos-client-release-tag 0xkey-qos_client-vX.Y.Z
+```
+
+### Standalone re-fetch (refresh, repair, audit)
+
+```bash
+python3 "$SKILL_DIR/scripts/fetch_qos_client.py" \
+  --release-tag latest \
+  --out "$WORKDIR/shared/qos_client"
+```
+
+Pass `--repo <org>/<repo>` to use a private mirror of the release, and
+export `GH_TOKEN` (or `GITHUB_TOKEN`) when the mirror requires
+authentication. `--release-tag latest` is the default; pass a concrete
+tag to pin.
+
+### Integrity layers
+
+Every published release ships three independent integrity anchors:
 
 1. Per-platform `.sha256` sidecar next to each `qos_client.<platform>` asset.
 2. A `MANIFEST.json` recording `qos_revision`, `built_at`, `workflow_run_url`,
@@ -52,30 +96,20 @@ Release on `https://github.com/0xkey-io/qos`, with three integrity layers:
    binary was produced by a specific workflow run on the `0xkey-io/qos`
    repository.
 
-The skill ships a stdlib helper to consume that channel. From a role
-workspace:
-
-```bash
-# Auto-fetch on first init (records the verified SHA256 in config.json):
-python3 "$SKILL_DIR/scripts/role_init.py" \
-  --role <role> \
-  --root  "$WORKDIR" \
-  --qos-client-release-tag 0xkey-qos_client-vX.Y.Z
-
-# Or fetch standalone (e.g. when the binary needs refreshing later):
-python3 "$SKILL_DIR/scripts/fetch_qos_client.py" \
-  --release-tag 0xkey-qos_client-vX.Y.Z \
-  --out "$WORKDIR/shared/qos_client"
-```
-
 `fetch_qos_client.py` auto-detects the platform via `uname`, downloads the
 binary plus its `.sha256` sidecar, refuses to install on hash mismatch
 (quarantining the bad binary at `<out>.tainted`), and prints a manual
 fallback recipe (curl + `gh release download` + `shasum -a 256 -c`) when
-the network or release path is unreachable. Doctor (`enclave_keyops.py
-doctor *`) detects a missing binary and re-prints the exact `fetch_qos_client.py`
-command but never auto-runs it.
+the network or release path is unreachable. `doctor` detects a missing
+binary or SHA mismatch and re-prints the exact `fetch_qos_client.py`
+command — defaulting to `--release-tag latest` even on workspaces that
+have no recorded release metadata — but doctor never auto-runs the
+fetch (`SECURITY.md §3.1`).
 
-A private mirror of the same release works the same way: pass
-`--repo <org>/<repo>` and export `GH_TOKEN` (or `GITHUB_TOKEN`) in the
-fetch environment.
+### Offline init
+
+On machines with no GitHub network access at init time, scaffold the
+workspace with `--no-qos-client-fetch` and run `fetch_qos_client.py`
+later from a host that does have access (or copy the verified binary +
+`.sha256` in by hand). `role_init.py --force` re-runs the fetch when
+the network is back and updates `config.json` with the verified hash.

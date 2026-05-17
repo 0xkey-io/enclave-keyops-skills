@@ -76,15 +76,28 @@ must never read or print the file contents. Store the public key in
 > filesystem. The agent that loaded this skill already knows it; resolve the
 > placeholder before invoking Python.
 
-Prefer the role init helper:
+Run the role init helper. By default it will resolve and download the
+latest Builder-published `qos_client` from `0xkey-io/qos` GitHub Releases
+(skipping prereleases), verify the SHA256 against the published sidecar,
+and install the verified binary at `$WORKDIR/shared/qos_client`. The
+operator does not have to remember a hash.
 
 ```bash
 python3 "$SKILL_DIR/scripts/role_init.py" \
   --role manifest-set-member \
   --root "$WORKDIR" \
-  --alias "$ALIAS" \
-  --qos-client-sha256 "$QOS_CLIENT_SHA256"
+  --alias "$ALIAS"
 ```
+
+Optional flags for non-default situations:
+
+- `--qos-client-release-tag <tag>` to pin a specific release (e.g.
+  `0xkey-qos_client-v0.1.0`) instead of resolving `latest`. Use this
+  when the ceremony lock requires a specific version.
+- `--qos-client-release-repo <owner/name>` to point at a private mirror.
+- `--no-qos-client-fetch` to scaffold the workspace without touching the
+  network. The follow-up `fetch_qos_client.py` command is printed in the
+  init "todo" block — run it after the network is available.
 
 Then ensure:
 
@@ -126,9 +139,12 @@ For alias specifically:
   Use "Coordinator 分配给你的 alias (来自 `member-roster.json`)；如果不
   知道请先去问 Coordinator".
 - ❌ Don't tell the user to drop `qos_client` somewhere without naming
-  the source. Use "向 Coordinator 索取本 ceremony 的 operator-client 包
-  (binary + SHA256 + qOS revision)；不要从公网下载，然后告诉我落在哪个
-  绝对路径".
+  the source. The default workflow is `role_init.py` auto-fetching the
+  latest stable release from `0xkey-io/qos` (verified SHA256). If the
+  user explicitly needs to pin a specific release for this ceremony,
+  ask the Coordinator for the locked tag and pass
+  `--qos-client-release-tag <tag>`; never instruct the user to grab a
+  binary from a random mirror.
 
 ## Vault mode: YubiKey vs file secret
 
@@ -184,7 +200,7 @@ Before running commands, inspect only `$WORKDIR` and classify the state.
 |-------|--------------------|-------------|
 | `uninitialized` | missing `config.json` | run `role_init.py` for this alias — but only if `waiting-for-roster` is NOT also active (see precedence rule above) |
 | `waiting-for-roster` | user said `<alias>` is `unknown`, OR alias does not appear in any received `BUNDLE.json.members.manifest_set` slice, OR no Coordinator-issued roster has been provided yet | ask Coordinator for the assigned alias from `member-roster.json`; do not let the user pick a name themselves; do not bake the user-claimed alias into `config.json` |
-| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | tell user to ask Coordinator to forward the Builder's operator-client release for this platform (binary + SHA256 + qOS revision); do not download from random sources, do not reuse a different ceremony's binary |
+| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `role_init.py` (default = auto-fetch latest from `0xkey-io/qos`); on offline machines run `python3 $SKILL_DIR/scripts/fetch_qos_client.py --release-tag latest --out $WORKDIR/shared/qos_client` and then re-run `role_init.py --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
 | `key-init-needed` | missing `outbox/<alias>.pub`; for file mode also missing external `.secret` path | YubiKey path: confirm slot is provisioned and run `key yubikey-provision`. File path: propose `$HOME/0xkey/operator-keys/<env>/<alias>/<alias>.secret` and run `key file-generate` after confirmation. (See "Vault mode" above.) |
 | `waiting-for-review` | has key material (YubiKey OR external secret) and `outbox/<alias>.pub`, missing `inbox/manifest-review-*.tgz` | ask user to place Coordinator review bundle in `inbox/` |
 | `ready-to-review` | has `shared/qos_client`, the chosen holder credential (YubiKey OR external secret), and review bundle | run holder doctor, extract, verify, summarize |

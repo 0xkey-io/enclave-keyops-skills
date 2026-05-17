@@ -97,9 +97,15 @@ or Share Set responsibilities).
 
 ## qos_client platform
 
-See [references/qos-client-platform.md](references/qos-client-platform.md). On
-macOS arm64, prefer a native `darwin/arm64` client published by the Builder;
-do not require the member to execute a `linux/amd64` release binary directly.
+`scripts/role_init.py` auto-fetches the latest stable `qos_client` from
+`0xkey-io/qos` GitHub Releases on first init and verifies the SHA256
+against the published sidecar — the operator does not have to type a
+hash. When the Coordinator pins a specific tag for this ceremony, pass
+`--qos-client-release-tag <tag>` to use that revision instead. See
+[references/qos-client-platform.md](references/qos-client-platform.md)
+for the operator-client matrix and the prerelease fallback. On macOS
+arm64 the auto-fetch picks `qos_client.darwin-arm64`; do not require the
+member to execute a `linux/amd64` release binary directly.
 
 ## Runbook
 

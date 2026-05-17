@@ -90,18 +90,34 @@
 
 ### 3.1 自动 fetch 红线
 
-`scripts/fetch_qos_client.py` 与 `role_init.py --qos-client-release-tag` 提供
-GitHub Releases 自动下载，**但不会绕过 SHA256 校验**。任何"网络抖动重试更
-快"或"先跳过 sha 校验等下次再补"的便利路径都视同破坏门禁：
+第一次 `role_init.py` 默认从 `0xkey-io/qos` GitHub Releases auto-fetch
+最新 stable `qos_client`（`/releases/latest`，跳过 prerelease），并在
+本地实算 SHA256 与发布的 `.sha256` sidecar 一致后才把二进制写入
+`qos_client_path`。`scripts/fetch_qos_client.py` 用同一逻辑独立运行。
+**这条 default 路径不绕过任何校验**——任何"网络抖动重试更快"或"先
+跳过 sha 校验等下次再补"的便利路径都视同破坏门禁：
 
-- 下载来的 `.sha256` 与本地实算 hash 不一致 → 二进制必须**隔离**（脚本写到
-  `<out>.tainted`），绝不安装到 `qos_client_path`，并 `exit 2`。
-- 若 builder-handoff 里另带了独立的 expected SHA256，必须再做第二次比对（
-  `--expected-sha256`）；任一不通过都判失败。
+- `/releases/latest` 返回的 release 默认是 non-prerelease；若仓库还没
+  发布 stable 版本（只有 RC tag），脚本会 fallback 到最近的 prerelease
+  并在 stderr 打印 `WARN: ... resolved 'latest' to prerelease ...`。
+  prerelease 不应进入 production ceremony；看到 WARN 应停下来等
+  Builder 出 stable release 或显式用 `--qos-client-release-tag` pin。
+- 下载来的 `.sha256` 与本地实算 hash 不一致 → 二进制必须**隔离**（脚本
+  写到 `<out>.tainted`），绝不安装到 `qos_client_path`，并 `exit 2`。
+- 若 builder-handoff 里另带了独立的 expected SHA256，必须再做第二次比对
+  （`fetch_qos_client.py --expected-sha256 <hex>`）；任一不通过都判
+  失败。
 - 任何形态的"先用着、后面补 sha"流程**不允许**；这一条没有 `--unsafe-...`
-  开关。
-- 自动 fetch 仅运行在 init / 升级 setup 阶段；`doctor` 永远只读，发现 binary
-  缺失也只**打印**可粘贴的 fetch 命令而**不**自执行。
+  开关。`role_init.py` 也没有 `--qos-client-sha256` 这种由人手填的 flag——
+  让人手填 sha 就给了输错或被偷换值的攻击面，所以已彻底删除；sha 永远
+  来自 release sidecar 和 fetch 实算两路独立计算。
+- 自动 fetch 仅在 init / 升级 setup 阶段运行；`doctor` 永远只读，发现
+  binary 缺失或 SHA mismatch 也只**打印**可粘贴的 fetch 命令而**不**自执行。
+- 离线初始化通过 `--no-qos-client-fetch` 开启：跳过下载，但 init 会
+  在输出里打印一条 todo，里面是后续应跑的 `fetch_qos_client.py` 完整
+  命令；操作员在网络可达的机器上跑完同一脚本（或人工 `gh release
+  download` + `shasum -a 256 -c` 落盘），再用 `role_init.py --force`
+  二次校验并写回 sha。该路径仍然走完整双重校验。
 
 ### qos_client 更换触发表
 

@@ -84,16 +84,32 @@ promote the same component names while changing registry, tag, and digest.
 > filesystem. The agent that loaded this skill already knows it; resolve the
 > placeholder before invoking Python.
 
+By default `role_init.py` resolves and downloads the latest stable
+`qos_client` from `0xkey-io/qos` GitHub Releases (the same channel
+Builder publishes to) into `$WORKDIR/out/qos_client.<host-platform>`,
+verifying it against the published SHA256 sidecar. This gives the
+Builder workspace an immediately-runnable reference client — useful for
+sanity-checking pivot hashes against the previous release before the new
+build is published.
+
 ```bash
 python3 "$SKILL_DIR/scripts/role_init.py" \
   --role builder \
   --root "$WORKDIR"
 ```
 
-After init, `$WORKDIR/out/` exists but is empty except for `out/README.md`
-and `out/qos-release/README.md`. That is the *prepare-needed* baseline, not
-an error — Builder is ready to receive source revisions / ECR config and
-then build.
+Optional flags:
+
+- `--qos-client-release-tag <tag>` to pin a specific previous release
+  rather than resolving `latest`.
+- `--no-qos-client-fetch` to scaffold the workspace without fetching;
+  `out/qos_client.<plat>` will be produced by the build itself instead.
+
+After init, `$WORKDIR/out/` exists but is empty except for `out/README.md`,
+`out/qos-release/README.md`, and (unless you passed `--no-qos-client-fetch`)
+the auto-fetched `out/qos_client.<host-platform>` reference client. That
+is the *prepare-needed* baseline, not an error — Builder is ready to
+receive source revisions / ECR config and then build.
 
 Expected output layout (Builder ONLY — Coordinator / Manifest / Share
 workspaces use `shared/` instead of `out/`):

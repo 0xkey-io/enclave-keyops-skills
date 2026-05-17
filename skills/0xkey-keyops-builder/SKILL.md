@@ -99,10 +99,17 @@ or `bundle *` (those are Coordinator / member responsibilities).
 
 ## qos_client platform
 
-See [references/qos-client-platform.md](references/qos-client-platform.md) for
-the per-platform release matrix and SHA256-pinning policy. Builder publishes
-the operator-client release directory described in
-`references/roles/builder.md`.
+Builder publishes the operator-client release to GitHub Releases on
+`0xkey-io/qos`; consumers (Coordinator / Manifest / Share) pull the
+binary by running `scripts/role_init.py` (default = auto-fetch latest
+stable, no SHA256 entry needed) or
+`scripts/fetch_qos_client.py --release-tag <tag>` to pin a specific
+revision. Builder's own `role_init.py` also auto-fetches a reference
+client into `out/qos_client.<host-platform>` for sanity checks against
+the previous release. See
+[references/qos-client-platform.md](references/qos-client-platform.md)
+for the per-platform release matrix, the prerelease fallback, and the
+in-ceremony version pin rule.
 
 ## Provisioning matrix
 

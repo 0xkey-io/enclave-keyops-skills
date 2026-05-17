@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import platform
 import shutil
@@ -43,6 +44,11 @@ from typing import Any, Optional, Tuple
 
 
 DEFAULT_REPO = "0xkey-io/qos"
+
+# Sentinel for "let GitHub pick the latest stable release". Treated as the
+# default both on the CLI (`--release-tag` is optional) and in role_init.py
+# (no flag → latest). See `resolve_release_tag` for the resolution rules.
+LATEST_TAG = "latest"
 
 # (uname.system_lower, uname.machine_lower) -> release platform slug.
 # We intentionally hard-code only the platforms that Builder publishes
@@ -80,7 +86,11 @@ def asset_urls(repo: str, tag: str, plat: str) -> Tuple[str, str]:
     return base, f"{base}.sha256"
 
 
-def _request(url: str, *, token: Optional[str]) -> urllib.request.Request:
+# Overridable for tests; production points at GitHub's REST API root.
+GITHUB_API_BASE = os.environ.get("FETCH_QOS_CLIENT_API_BASE", "https://api.github.com")
+
+
+def _request(url: str, *, token: Optional[str], accept: Optional[str] = None) -> urllib.request.Request:
     req = urllib.request.Request(url)
     # GitHub's release asset CDN returns 200 for public repos without auth.
     # When `token` is set, the same Authorization header is forwarded across
@@ -89,8 +99,100 @@ def _request(url: str, *, token: Optional[str]) -> urllib.request.Request:
     if token:
         req.add_header("Authorization", f"Bearer {token}")
     req.add_header("User-Agent", "0xkey-keyops-fetch-qos-client/1")
-    req.add_header("Accept", "application/octet-stream")
+    req.add_header("Accept", accept or "application/octet-stream")
     return req
+
+
+def _api_get_json(url: str, *, token: Optional[str], timeout: float) -> Any:
+    """GET a JSON document from the GitHub REST API. Raises FetchError on
+    non-200 / network errors. Used only for release metadata lookup; the
+    binary itself still flows through the asset CDN.
+    """
+    try:
+        req = _request(url, token=token, accept="application/vnd.github+json")
+        # The X-GitHub-Api-Version header is best-practice but optional; we
+        # hard-pin it so a future GitHub default change can't silently shift
+        # the response shape that resolve_release_tag depends on.
+        req.add_header("X-GitHub-Api-Version", "2022-11-28")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = getattr(resp, "status", 200)
+            if status != 200:
+                raise FetchError(f"unexpected HTTP status {status} for {url}")
+            body = resp.read()
+    except urllib.error.HTTPError as e:
+        raise FetchError(f"HTTP {e.code} fetching {url}: {e.reason}") from e
+    except urllib.error.URLError as e:
+        raise FetchError(f"network error fetching {url}: {e.reason}") from e
+    except TimeoutError as e:
+        raise FetchError(f"timeout fetching {url}") from e
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise FetchError(f"malformed JSON from {url}: {e}") from e
+
+
+def resolve_release_tag(
+    repo: str,
+    *,
+    want: Optional[str],
+    token: Optional[str],
+    timeout: float,
+) -> str:
+    """Resolve a (possibly-implicit) release identifier to a concrete tag.
+
+    Resolution rules:
+
+    * ``want`` is None or the literal string ``"latest"`` → query
+      ``GET /repos/<repo>/releases/latest``. GitHub returns the most recent
+      *non-prerelease, non-draft* release. This is the safe default for
+      ceremony pinning.
+    * If ``/releases/latest`` returns 404 (no stable release yet — common
+      while the project is in RC), fall back to
+      ``GET /repos/<repo>/releases?per_page=1``. We then resolve to the
+      most recent release of *any* kind (prerelease included) and emit a
+      stderr warning so the operator notices they are running off a
+      prerelease binary. Production should publish a stable release to
+      remove the warning.
+    * Any other ``want`` is treated as an explicit tag and returned
+      verbatim. We do not validate that the tag exists here; the caller's
+      asset download will surface a 404 with a clear URL.
+    """
+    if want is not None and want != LATEST_TAG:
+        return want
+    api = f"{GITHUB_API_BASE}/repos/{repo}/releases/latest"
+    try:
+        data = _api_get_json(api, token=token, timeout=timeout)
+    except FetchError as e:
+        msg = str(e)
+        if "HTTP 404" not in msg:
+            raise
+        # No stable release yet → fall back to the newest of any kind.
+        list_api = f"{GITHUB_API_BASE}/repos/{repo}/releases?per_page=1"
+        items = _api_get_json(list_api, token=token, timeout=timeout)
+        if not isinstance(items, list) or not items:
+            raise FetchError(
+                f"{repo} has no releases at all; ask the Builder to publish "
+                "an initial qos_client release before re-running."
+            ) from e
+        first = items[0]
+        tag = first.get("tag_name")
+        if not isinstance(tag, str) or not tag:
+            raise FetchError(
+                f"unexpected response shape from {list_api}: missing tag_name"
+            ) from e
+        if first.get("prerelease"):
+            sys.stderr.write(
+                f"WARN: {repo} has no stable release yet; resolved 'latest' to "
+                f"prerelease {tag}. Pin a stable tag with --release-tag <tag> "
+                "before running a production ceremony.\n"
+            )
+        return tag
+    if not isinstance(data, dict):
+        raise FetchError(f"unexpected response shape from {api}: not an object")
+    tag = data.get("tag_name")
+    if not isinstance(tag, str) or not tag:
+        raise FetchError(f"unexpected response shape from {api}: missing tag_name")
+    return tag
 
 
 def _download_to(url: str, dest: Path, *, token: Optional[str], timeout: float) -> None:
@@ -273,8 +375,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument(
         "--release-tag",
-        required=True,
-        help="GitHub release tag (e.g. 0xkey-qos_client-v0.1.0).",
+        default=LATEST_TAG,
+        help=(
+            "GitHub release tag (e.g. 0xkey-qos_client-v0.1.0). "
+            f"Default: {LATEST_TAG} — resolves via GitHub's "
+            "/releases/latest API (skips drafts and prereleases). "
+            "When no stable release exists yet the script falls back to the "
+            "most recent prerelease and prints a stderr WARN."
+        ),
     )
     p.add_argument(
         "--platform",
@@ -321,11 +429,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
 
     plat: Optional[str] = None
+    resolved_tag = ns.release_tag
     try:
         plat = detect_platform() if ns.platform == "auto" else ns.platform
+        resolved_tag = resolve_release_tag(
+            ns.repo, want=ns.release_tag, token=token, timeout=ns.timeout
+        )
         digest = fetch_binary(
             repo=ns.repo,
-            tag=ns.release_tag,
+            tag=resolved_tag,
             plat=plat,
             out=out,
             expected_sha256=ns.expected_sha256,
@@ -336,7 +448,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print_manual_fallback(
             reason=str(e).splitlines()[0],
             repo=ns.repo,
-            tag=ns.release_tag,
+            tag=resolved_tag,
             plat=plat,
             out=out,
         )
@@ -349,7 +461,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print_manual_fallback(
             reason=f"unexpected error: {type(e).__name__}: {e}",
             repo=ns.repo,
-            tag=ns.release_tag,
+            tag=resolved_tag,
             plat=plat,
             out=out,
         )
@@ -357,6 +469,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     print(f"installed: {out}")
     print(f"sidecar:   {out}.sha256")
+    print(f"release:   {resolved_tag}")
     print(f"sha256:    {digest}")
     return 0
 

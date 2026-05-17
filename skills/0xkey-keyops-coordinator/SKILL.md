@@ -88,9 +88,14 @@ Coordinator must NOT invoke `manifest approve` (Manifest Set responsibility) or
 
 ## qos_client platform
 
-See [references/qos-client-platform.md](references/qos-client-platform.md) for
-operator-client matrix and the in-ceremony version pin rule (one ceremony, one
-`qos_client` revision).
+`scripts/role_init.py` auto-fetches the latest stable `qos_client` from
+`0xkey-io/qos` GitHub Releases on first init (verified SHA256, no
+operator hash entry needed). When ceremony lock requires a specific
+revision, pass `--qos-client-release-tag <tag>` and communicate the same
+tag to all members. See
+[references/qos-client-platform.md](references/qos-client-platform.md)
+for the operator-client matrix, the in-ceremony version pin rule (one
+ceremony, one `qos_client` revision), and the prerelease fallback.
 
 ## Provisioning matrix and exchange transport
 
