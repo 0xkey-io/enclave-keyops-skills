@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-share
-version: 0.2.0
+version: 0.3.0
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Share Set member role:
   verifying a Coordinator-issued share-request bundle, running
@@ -119,7 +119,7 @@ member to execute a `linux/amd64` release binary directly.
 
 ## Version & update
 
-This skill is version `0.2.0` (see the frontmatter at the top of this
+This skill is version `0.3.0` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any

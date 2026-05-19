@@ -32,6 +32,47 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.3.0 — 2026-05-19
+
+### Headline
+
+Documentation rewritten in English for international readability; YubiKey
+provision preflight added to prevent common first-time provisioning failures.
+
+### Added
+
+- `enclave_keyops.py key yubikey-provision` now runs a preflight that:
+  - verifies `ykman` is installed,
+  - checks that YubiKey PIV Management key algorithm is TDES (not AES192),
+  - detects occupied PIV slots 9C/9D and requires typed confirmation before
+    overwriting,
+  - prints an explicit two-touch notice so the operator knows to watch the LED.
+- Operator prompt templates now include recommended default workspace paths
+  (e.g. `~/.0xkey-ops/coordinator`).
+- New test file `tests/test_yubikey_provision_preflight.py` covering MGM
+  algorithm check, both-slots-occupied, wrong-confirmation-phrase, and
+  touch-notice scenarios.
+
+### Changed
+
+- All core documentation (`PRINCIPLES.md`, `SECURITY.md`, `WORKFLOWS.md`,
+  role runbooks, `workspace-rules.md`, `operator-prompts.md`) rewritten in
+  English. Chinese retained only in README operator-prompt trigger examples.
+- Cross-role refusal wording in all four `SKILL.md` files unified to a
+  single concise line.
+- `_piv_slot_occupied` simplified to fail-closed: any non-empty output that
+  does not match known "empty" markers is treated as occupied.
+- Roster-first rule in `workspace-rules.md` reworded for clarity.
+- `SECURITY.md` section references updated from `§N "中文标题"` to
+  `section N` style.
+
+### Notes
+
+- No breaking changes to CLI arguments or config format.
+- Existing workspaces do not need re-initialization.
+
+---
+
 ## 0.2.0 — 2026-05-17 — BREAKING
 
 ### Headline
