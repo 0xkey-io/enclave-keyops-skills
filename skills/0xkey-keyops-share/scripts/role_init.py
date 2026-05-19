@@ -471,7 +471,7 @@ Inputs to place here:
 - `shared/{{manifest-set,share-set,patch-set}}/*.pub`
 - `shared/{{manifest-set,share-set,patch-set}}/quorum_threshold` (single-line
   decimal integer; copy `quorum_threshold.example` and edit; recommended
-  values live in SECURITY.md `Threshold 推荐`)
+  values live in SECURITY.md threshold recommendations)
 - `shared/dr-key.pub` (260-hex DR public key from the external DR holder;
   the placeholder file is `shared/dr-key.pub.PLACEHOLDER`)
 - `shared/member-roster.json` (Coordinator-issued alias / member-index

@@ -89,35 +89,33 @@ enters a Coordinator workdir.
 
 ## Roster-first rule (alias must come from Coordinator)
 
-`alias` 与（Share 角色的）`member_index` 由 Coordinator 在
-`shared/member-roster.json` 中单方面分配（详见
-`references/roles/coordinator.md` `Alias / member-index assignment` 与
-PRINCIPLES §11）。成员**只能确认不能自取**。在 agent 这一层落实为：
+Coordinator assigns `alias` and, for Share Set members, `member_index` in
+`shared/member-roster.json` (see `references/roles/coordinator.md` and
+PRINCIPLES section 11). Members confirm assignments but do not choose them.
 
-- 不允许用户自报的 alias 在 **没有任何 roster 背书** 时被烧进
-  `config.json`、写入 `outbox/<alias>.pub`、或作为命令行参数固化到
-  `role_init.py`。
-- "有 roster 背书" 指以下任一：
-  1. 用户在 prompt 里直接给出了 `member-roster.json` 的内容或绝对路径；
-  2. 用户给出了一个含 `BUNDLE.json.members.<set>` slice 的 bundle（review
-     / share-request / genesis-output），且该 slice 包含用户口报的
-     `(alias, member_index?)`；
-  3. 用户引用了一个由 Coordinator 签名的 roster 公告，agent 可以核对其中
-     该 alias 是否存在。
-- 在以上任何一种背书到位之前，state 必须叠加 `waiting-for-roster`，且：
-  - **不要**调 `role_init.py`；脚本层会拒绝缺少 roster-backed
-    `--alias`（Share 还需要 `--member-index`）的成员初始化。先停下要
-    roster，再用 roster 上的值初始化。
-  - **不要**生成 `outbox/<user-alias>.pub`；先让 Coordinator 公布
-    roster，再以 roster 上的 alias 为唯一文件名生成。
-  - **不要**接受用户"我自己起个 alias 就行" 的提议——alias 撞名会让
-    `<alias>.pub` 互相覆盖、approval 落进错误槽位，且 Genesis 之后无法修
-    复（见 PRINCIPLES §11）。
+Do not write a user-claimed alias into `config.json`, `outbox/<alias>.pub`, or
+`role_init.py` arguments until it is backed by a Coordinator roster.
 
-这条规则对 Manifest Set member、Share Set member、（以及任何未来新增的成
-员角色）都适用，是 state-detection 表的**前置约束**：即便表里 `uninitialized`
-行的 evidence 看起来只问 "missing `config.json`"，只要 `waiting-for-roster`
-同时叠加，就**不要**进 init。
+Roster backing means one of:
+
+1. the user provided `member-roster.json` contents or an absolute path;
+2. the user provided a review / share-request / genesis-output bundle whose
+   `BUNDLE.json.members.<set>` slice contains the claimed assignment;
+3. the user references a Coordinator-signed roster announcement that the agent
+   can check.
+
+Until roster backing exists, add `waiting-for-roster` to state and:
+
+- do not run `role_init.py`; the script refuses member init without
+  roster-backed `--alias` and, for Share, `--member-index`;
+- do not generate `outbox/<user-alias>.pub`;
+- do not accept proposals to "just pick an alias"; collisions can overwrite
+  `.pub` files, mis-slot approvals, and become unrecoverable after Genesis.
+
+This rule applies to Manifest Set members, Share Set members, and future member
+roles. It is a precedence constraint over state-detection rows: even if
+`config.json` is missing, do not initialize while `waiting-for-roster` is also
+active.
 
 ## Member key generation support
 

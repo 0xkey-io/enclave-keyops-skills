@@ -1,5 +1,5 @@
 {
-  "$schema_comment": "复制为 enclave-keyops.<env>.json 后填真实路径；勿提交含秘密的文件。",
+  "$schema_comment": "Copy to enclave-keyops.<env>.json, fill real paths, and never commit files containing secrets.",
   "qos_client_path": "/ABS/PATH/TO/qos_client",
   "qos_client_sha256_expected": null,
   "$qos_client_release_comment": "Optional. When non-null records the GitHub release Builder published this client from, e.g. {\"tag\": \"0xkey-qos_client-v0.1.0\", \"repo\": \"0xkey-io/qos\", \"platform\": \"darwin-arm64\"}. doctor uses it to print a precise fetch command when the binary is missing.",

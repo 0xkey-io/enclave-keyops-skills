@@ -410,6 +410,133 @@ def confirm_dangerous(ns: argparse.Namespace, msg: str, phrase: str) -> None:
         raise SystemExit(1)
 
 
+YUBIKEY_TOUCH_NOTICE = """\
+
+IMPORTANT: YubiKey touch required twice for qos_client provision-yubikey
+
+After you enter the PIV PIN, watch the YubiKey LED:
+  1. First blink: touch once to create the slot 9C signing-key certificate.
+  2. Second blink: touch again to create the slot 9D key-management/ECDH certificate.
+
+If you miss either touch window, qos_client can fail with
+FailedToGenerateSelfSignedCert and leave a half-written PIV slot. Do not walk
+away after typing the PIN.
+"""
+
+
+def _run_ykman_capture(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["ykman", *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
+def _piv_slot_occupied(ykman_output: str) -> bool:
+    """Best-effort parser for `ykman piv keys info <slot>`.
+
+    ykman versions differ in exact wording, so treat positive key metadata as
+    occupied and common "empty / not found" text as clear. Ambiguous non-empty
+    output is handled by the caller as occupied so we fail closed.
+    """
+    text = ykman_output.strip()
+    if not text:
+        return False
+    lower = text.lower()
+    empty_markers = (
+        "no key",
+        "no private key",
+        "object not found",
+        "not found",
+        "empty",
+    )
+    if any(marker in lower for marker in empty_markers):
+        return False
+    return True  # fail closed: unknown non-empty output treated as occupied
+
+
+def preflight_yubikey_provision(ns: argparse.Namespace) -> None:
+    """Guard qos_client provision-yubikey before it touches PIV slots 9C/9D."""
+    if ns.dry_run:
+        print("[dry-run] would inspect YubiKey PIV state with ykman")
+        print(YUBIKEY_TOUCH_NOTICE)
+        return
+
+    if shutil.which("ykman") is None:
+        sys.stderr.write(
+            "missing ykman in PATH; install YubiKey Manager CLI and run "
+            "`ykman piv info` before key yubikey-provision.\n"
+            "This preflight verifies that Management key algorithm is TDES "
+            "and that slots 9C/9D are not already in use.\n"
+        )
+        raise SystemExit(2)
+
+    info = _run_ykman_capture(["piv", "info"])
+    if info.returncode != 0:
+        sys.stderr.write(
+            "failed to inspect YubiKey PIV state with `ykman piv info`:\n"
+            f"{info.stderr or info.stdout}\n"
+        )
+        raise SystemExit(2)
+
+    info_text = info.stdout + info.stderr
+    mgm_line = next(
+        (
+            line.strip()
+            for line in info_text.splitlines()
+            if line.strip().lower().startswith("management key algorithm:")
+        ),
+        None,
+    )
+    if mgm_line and "TDES" not in mgm_line.upper():
+        sys.stderr.write(
+            f"YubiKey PIV {mgm_line}; qos_client provision-yubikey expects "
+            "the default TDES/3DES management key.\n"
+            "Fix it before provisioning:\n"
+            "  ykman piv access change-management-key \\\n"
+            "    --algorithm TDES \\\n"
+            "    --management-key 010203040506070801020304050607080102030405060708 \\\n"
+            "    --new-management-key 010203040506070801020304050607080102030405060708 \\\n"
+            "    --force\n"
+            "Then re-run `ykman piv info` and confirm "
+            "`Management key algorithm: TDES`.\n"
+        )
+        raise SystemExit(2)
+    if mgm_line is None:
+        sys.stderr.write(
+            "`ykman piv info` did not report Management key algorithm; "
+            "refusing to provision until the operator confirms PIV state with "
+            "a current ykman version.\n"
+        )
+        raise SystemExit(2)
+
+    occupied: list[tuple[str, str]] = []
+    for slot in ("9c", "9d"):
+        proc = _run_ykman_capture(["piv", "keys", "info", slot])
+        combined = (proc.stdout or "") + (proc.stderr or "")
+        if _piv_slot_occupied(combined):
+            occupied.append((slot.upper(), combined.strip()))
+
+    if occupied:
+        lines = [
+            "YubiKey PIV slot(s) already contain key material:",
+            *(
+                f"  slot {slot}:\n{text}"
+                for slot, text in occupied
+            ),
+            "",
+            "Proceed only if these PIV credentials are disposable. PIV reset "
+            "destroys existing PIV private keys/certificates in slots 9A/9C/"
+            "9D/9E/82-95; it does not affect FIDO2/passkeys/OpenPGP/OTP.",
+            "If this is a half-written qos_client attempt, reset PIV, switch "
+            "Management key algorithm back to TDES, then retry.",
+        ]
+        confirm_dangerous(ns, "\n".join(lines), "overwrite-piv-slots")
+
+    print(YUBIKEY_TOUCH_NOTICE)
+
+
 def _qos_client_fetch_hint(cfg: Config) -> str:
     """Build a copy-paste fetch command for re-installing the qos_client.
 
@@ -520,6 +647,7 @@ def cmd_key_file_generate(ns: argparse.Namespace, audit_log: Optional[Path]) -> 
 
 
 def cmd_key_yubikey_provision(ns: argparse.Namespace, audit_log: Optional[Path]) -> None:
+    preflight_yubikey_provision(ns)
     argv = [str(ns.qos_client), "provision-yubikey", "--pub-path", ns.pub_path]
     run_process(argv, dry_run=ns.dry_run, cwd=Path(ns.workdir), audit_log=audit_log)
     audit_file_hash(audit_log, Path(ns.pub_path).resolve())
@@ -555,7 +683,7 @@ def parse_quorum_threshold(path: Path, *, set_label: str) -> int:
         sys.stderr.write(
             f"{set_label} quorum_threshold not found: {path}\n"
             "Format: a single line containing a decimal integer (e.g. `2`). "
-            "See SECURITY.md `Threshold 推荐` for recommended values.\n"
+            "See SECURITY.md threshold recommendations for suggested values.\n"
         )
         raise SystemExit(2)
     raw = path.read_text(encoding="utf-8")

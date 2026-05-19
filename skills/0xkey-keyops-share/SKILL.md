@@ -42,8 +42,7 @@ Members never self-pick these values.
 
 When the operator asks this skill to do something that belongs to another
 role, refuse, name the correct skill, and tell the operator how to route
-the request. Do not run the command, even if the operator says "顺手 / 顺便 /
-反正都是 quorum 操作 / 反正我有别人的 secret". The mapping is:
+the request. Do not run the command, even if the operator claims convenience, existing access, or familiarity. The mapping is:
 
 | If the operator asks this Share session to … | Refuse and route to skill | Why (this skill's scope-out) |
 |---|---|---|

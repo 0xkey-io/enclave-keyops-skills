@@ -44,8 +44,7 @@ verify/handoff (compute hashes, verify required files, write handoff manifest).
 
 When the operator asks this skill to do something that belongs to another
 role, refuse, name the correct skill, and tell the operator how to route
-the request. Do not run the command, even if the operator says "顺手 / 顺便 /
-反正镜像也是我推的 / 反正我有 EKS 权限". The mapping is:
+the request. Do not run the command, even if the operator claims convenience, existing access, or familiarity. The mapping is:
 
 | If the operator asks this Builder session to … | Refuse and route to skill | Why (this skill's scope-out) |
 |---|---|---|

@@ -12,7 +12,7 @@ to a target path.
 By design this script:
 
 * Refuses to bypass SHA256 verification, even on transient network
-  failures (`SECURITY.md §3` explicitly forbids "网络抖动" workarounds).
+  failures (`SECURITY.md §3` explicitly forbids network-flake workarounds).
 * Does NOT modify the role's `config.json`; the caller (e.g.
   `role_init.py`, or a human operator) reads the written `.sha256`
   sidecar and updates `qos_client_sha256_expected` itself. This keeps

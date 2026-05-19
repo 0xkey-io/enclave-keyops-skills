@@ -49,14 +49,14 @@ class SecurityForbidsCrossMemberBorrowing(unittest.TestCase):
         self.assertIsNotNone(m, "could not isolate §1.1 body")
         body = m.group(0)
         self.assertTrue(
-            "借用" in body or "borrow" in body.lower(),
+            "borrow" in body.lower(),
             "SECURITY.md §1.1 must discuss cross-member secret/share borrowing",
         )
 
     def test_calls_out_borrow_scenarios(self) -> None:
         # The section should name the three common social-engineering shapes
         # so an agent can quote a specific example back to the operator.
-        for needle in ("出差", "共用一台机器", "key compromise"):
+        for needle in ("away", "share a workstation", "key compromise"):
             with self.subTest(needle=needle):
                 self.assertIn(
                     needle,
@@ -99,7 +99,7 @@ class WorkspaceRulesHasRosterFirstRule(unittest.TestCase):
         self.assertIn("waiting-for-roster", self.text)
         self.assertRegex(
             self.text,
-            r"前置约束|precedence",
+            r"precedence",
             "Roster-first rule must say it takes precedence over the "
             "uninitialized row of the state-detection table",
         )
@@ -300,10 +300,10 @@ class OperatorPromptsHaveCompleteTemplates(unittest.TestCase):
         self.assertIsNotNone(m, "Builder operator prompt missing")
         body = m.group(1)
         for needle in (
-            "目标环境",
+            "Target environment",
             "AWS account",
             "ECR registry",
-            "target_platforms 候选" if False else "operator-client",  # platforms
+            "operator-client",
         ):
             with self.subTest(needle=needle):
                 self.assertIn(needle, body)

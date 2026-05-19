@@ -141,17 +141,17 @@ order:
    "workdir exists, empty")
 3. **missing**: each item names what is missing AND who to ask for it
    (Coordinator vs user vs external vault)
-4. **vault mode**: ask the user one line — "你的 long-term key 在
-   YubiKey (`--yubikey`) 还是加密磁盘文件 (`--secret-path`)? prod 推荐
-   YubiKey，见 SECURITY.md §5.1"。后续 `share-extract` / `reencrypt`
-   的命令形态取决于这个答案；`.share` 仍然是外部 vault 中的文件，与凭据
-   形态无关。
+4. **vault mode**: ask one line — "Is your long-term key on a YubiKey
+   (`--yubikey`) or in an encrypted-disk file (`--secret-path`)? Production
+   prefers YubiKey; see SECURITY.md section 5.1." Later `share-extract` /
+   `reencrypt` command shapes depend on this answer. `.share` is still an
+   external-vault file regardless of credential mode.
 5. **next**: 1-line concrete next step
 
 For alias / member_index specifically:
-- ❌ Don't write "alias (例如 share-member2)" — that suggests the user can
-  pick. Use "Coordinator 分配给你的 alias (来自 `member-roster.json`)；
-  如果不知道请先去问 Coordinator".
+- ❌ Don't write "alias (for example share-member2)" — that suggests the user
+  can pick. Use "Coordinator-assigned alias from `member-roster.json`; if
+  unknown, ask the Coordinator first."
 - ❌ Don't initialize with `share-member1` or infer `member-index` from the
   alias as a placeholder identity. The helper now requires roster-backed
   `--alias` and `--member-index`; wait for the roster before initializing or
@@ -163,8 +163,8 @@ For alias / member_index specifically:
   ceremony, pass it as `--qos-client-release-tag <tag>`; never instruct
   the user to grab a binary from a random mirror or to reuse another
   ceremony's binary.
-- For the missing `.share` case: explicitly mention "如果没有 .share，说明
-  是首次 ceremony，agent 会走 genesis-output → share-extract 分支".
+- For the missing `.share` case: explicitly say that first ceremony share
+  material is produced through the genesis-output -> share-extract branch.
 
 ## Vault mode: YubiKey vs file secret
 
@@ -186,12 +186,12 @@ session — pick one at first-turn and use it consistently.
 | qos_client requirement | Builder-released `qos_client` revision must ship with PIV support; `doctor holder` reports this                   | Any audited release works                                                                      |
 
 > ⚠️ Mutual exclusion: passing both `--yubikey` and `--secret-path` is a
-> hard error in `enclave_keyops.py`. If the user starts the session
-> saying "我用 YubiKey", do not also fill in `--secret-path` "为了保险"
+> hard error in `enclave_keyops.py`. If the user starts the session saying
+> "I use a YubiKey", do not also fill in `--secret-path` as a fallback
 > — the script will refuse and you'll have to ask again.
 >
 > ⚠️ First-time YubiKey use: **before** running `key yubikey-provision`,
-> walk the user through `SECURITY.md §5.2.1 "YubiKey 首次准备清单"`. The
+> walk the user through `SECURITY.md` section 5.2.1. The
 > three failure modes observed in real-world testing on 2026-05-16 were
 > (a) PIV `Management key algorithm: AES192` (YubiKey 5.7+ factory
 > default) vs qos_client's hard-coded TDES expectation → MGM auth
@@ -203,6 +203,19 @@ session — pick one at first-turn and use it consistently.
 > user has never run provision against this exact YubiKey before, ask
 > them to run `ykman piv info` first and confirm the four properties
 > §5.2.1 step 1 lists.
+>
+> The wrapper preflights `ykman piv info` and `ykman piv keys info 9c/9d`.
+> If `Management key algorithm` is not `TDES`, stop and show the
+> `ykman piv access change-management-key --algorithm TDES ...` command from
+> SECURITY.md. If slot 9C or 9D already contains key material, warn that it
+> may belong to another PIV use or a half-failed qos_client attempt and require
+> the typed confirmation phrase before proceeding.
+>
+> Make the touch requirement explicit immediately before provisioning:
+> qos_client needs **two YubiKey touches** after PIN entry. First touch creates
+> the slot 9C signing-key certificate; second touch creates the slot 9D key
+> management / ECDH certificate. If the operator misses either blink window,
+> provisioning can fail and leave a half-written slot.
 >
 > ⚠️ `.share` is NEVER on the YubiKey. Even in YubiKey mode the agent
 > still requires an external `--share-path` outside the role workdir for

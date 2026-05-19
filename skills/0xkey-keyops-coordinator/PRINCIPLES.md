@@ -1,28 +1,40 @@
-# Enclave KeyOps Skill — 维护原则
+# Enclave KeyOps Skill Maintenance Principles
 
-本文件用于后续修改本 skill 时做自检。任何改动若违反这些原则，应先停下来重新设计。
+Use this checklist whenever modifying this skill. If a proposed change violates
+one of these principles, stop and redesign before shipping it.
 
-## 1. Prod-like 验证先行
+## 1. Prod-Like Validation First
 
-- 新增或修改 CLI 流程后，先在 prod-like 非生产环境完成一次非破坏性验证。
-- 真实生产 ceremony 前，至少验证：`doctor coordinator`、bundle create/extract/verify、五服务 `manifest envelope --dry-run`、`verify --dry-run`。
-- 完整演练顺序：`doctor coordinator` → prod-like 配置 `manifest envelope --dry-run` → `bundle create/extract/verify` → `verify`。涉及 `deploy apply`、`boot-standard`、`post-share` 前必须单独取得人工确认。
-- 未经 prod-like 验证的命令不得直接用于生产密钥、manifest 或 K8s apply。
+- Validate new or changed CLI flows in a prod-like non-production environment
+  before using them with production key material.
+- Before a production ceremony, validate at least `doctor coordinator`, bundle
+  create/extract/verify, five-service `manifest envelope --dry-run`, and
+  `verify --dry-run`.
+- Any flow involving `deploy apply`, `boot-standard`, or `post-share` requires a
+  separate human approval gate.
+- Commands that have not been validated in a prod-like environment must not be
+  used directly against production keys, manifests, or Kubernetes apply steps.
 
-## 2. 不出现历史命名
+## 2. No Legacy Naming
 
-- 文档、配置模板、脚本默认值中不得出现旧项目名或历史 namespace。
-- 默认命名使用 `0xkey` / `0xkey-enclave`，真实环境差异必须通过外部配置显式声明。
+- Documentation, config templates, and script defaults must not contain old
+  project names or historical namespaces.
+- Defaults use `0xkey` and `0xkey-enclave`; environment-specific differences
+  must be explicit external configuration.
 
-## 3. 角色最小权限
+## 3. Least-Privilege Roles
 
-- `doctor holder` 不应要求 `kubectl`、`aws` 或集群访问。
-- `doctor coordinator` 才检查 K8s/AWS 依赖与 context allowlist。
-- Share/Manifest 成员只处理本地 bundle 与自己的 `.secret` / `.share`；不要求他们接入 K8s。
+- `doctor holder` must not require `kubectl`, AWS credentials, or cluster
+  access.
+- Only `doctor coordinator` checks Kubernetes / AWS dependencies and context
+  allowlists.
+- Manifest / Share members handle local bundles and their own holder
+  credentials only; they do not need Kubernetes access.
 
-## 4. 危险步骤不可自动确认
+## 4. Dangerous Steps Require Exact Confirmation
 
-以下步骤必须保留精确短语确认，不能被全局 `--yes` 绕过：
+These steps must keep exact typed confirmations and must not be bypassed by
+global `--yes`:
 
 - `approve-manifest`
 - `proxy-re-encrypt-share`
@@ -31,61 +43,71 @@
 - `unsafe-skip-attestation`
 - `unsafe-auto-confirm`
 
-## 5. Approval 必须精确匹配
+## 5. Approval Matching Must Be Exact
 
-- 不允许“取目录里第一个 `.approval`”。
-- 选择 approval 时必须同时匹配：`alias`、service manifest namespace、manifest nonce。
-- `manifest envelope` 前必须拒绝混入其它服务或其它 nonce 的 approval。
+- Never choose "the first `.approval` in a directory."
+- Approval selection must match alias, service manifest namespace, and manifest
+  nonce.
+- `manifest envelope` must reject approvals from other services or other
+  nonces.
 
-## 6. Bundle 优先于手工目录
+## 6. Bundles Are The Interface
 
-- 交接材料必须通过 `bundle create` / `bundle extract` / `bundle verify` 标准化。
-- 每个 bundle 必须包含 `BUNDLE.json` 与 `SHA256SUMS`。
-- 解包必须防止 tar path traversal，校验 checksum 后再使用。
+- Handoff material must use `bundle create`, `bundle extract`, and
+  `bundle verify`.
+- Every bundle must contain `BUNDLE.json` and `SHA256SUMS`.
+- Extraction must defend against tar path traversal and verify checksums before
+  use.
 
-## 7. 验证必须覆盖控制面和数据面
+## 7. Verification Covers Control Plane And Data Plane
 
-- 仅 Pod Ready 不足。
-- 仅 `/qos/enclave-health` HTTP 200 不足。
-- 必须检查 `QuorumKeyProvisioned`，再检查 `app-bridge :8081/health` 和业务路由 POST smoke。
+- Pod Ready alone is not sufficient.
+- `/qos/enclave-health` HTTP 200 alone is not sufficient.
+- Verification must check `QuorumKeyProvisioned`, `app-bridge :8081/health`,
+  and business-route POST smoke.
 
-## 8. 不内置二进制和秘密
+## 8. No Embedded Binaries Or Secrets
 
-- skill 目录不得包含 `qos_client`、镜像、`.secret`、`.share`、wrapped share、真实环境配置。
-- `qos_client` 通过外部分发，并用 `qos_client_sha256_expected` 校验。
+- Skill directories must not contain `qos_client`, container images, `.secret`,
+  `.share`, wrapped-share plaintext, or real environment configs.
+- `qos_client` is distributed externally and verified with the configured
+  expected SHA256.
 
-## 9. 失败要显式停止
+## 9. Fail Explicitly
 
-- PCR、pivot hash、nonce、approval、bundle checksum、K8s context、数据面验证失败都必须退出非零。
-- 不用静默 fallback、空 catch 或自动重试掩盖根因。
+- PCR, pivot hash, nonce, approval, bundle checksum, Kubernetes context, and
+  data-plane verification failures must exit non-zero.
+- Do not hide root causes with silent fallbacks, empty catches, or automatic
+  retry loops.
 
-## 10. 交接信道不绑定 FS 命名
+## 10. Transport Is Not A Filesystem Contract
 
-- skill 只规范 **bundle 接口**：`<name>-<stamp>.tgz` + 外层 `.tgz.sha256`，bundle 内
-  含 `SHA256SUMS` 与 `BUNDLE.json`（kind / services / namespaces / nonces 元数据）。
-- skill **不规定** bundle 经由什么渠道在角色之间流转。本地共享 FS、S3、IM 群聊、
-  加密邮件、加密 U 盘、私有 git 仓库都是合法实现。
-- 角色 workdir 内的 `inbox/` 与 `outbox/` 目录是**消费者本地落点**，不是跨成员
-  的协议路径；发送方不需要知道接收方把 bundle 放在哪个子目录。
-- 任何调试实现里的 `coordinator-to-members/<topic>/...` 之类的固定 FS 命名
-  不属于 skill 契约，不应作为 skill 文档的默认假设。
-- 如果未来需要为某种渠道引入特殊语义（例如签名邮件附带 PGP 签名），通过新增
-  bundle 元数据字段实现，而不是通过约定目录名。
+- The skill defines the bundle interface: `<name>-<stamp>.tgz` plus outer
+  `.tgz.sha256`, with `SHA256SUMS` and `BUNDLE.json` inside.
+- It does not prescribe the transport channel between roles. Shared filesystem,
+  S3, chat with file attachment, encrypted email, encrypted USB, and private git
+  are all possible operator choices.
+- `inbox/` and `outbox/` inside a role workdir are local consumer drop points,
+  not cross-member protocol paths.
+- Fixed debug names such as `coordinator-to-members/<topic>/...` are not part of
+  the skill contract.
+- Future transport-specific semantics should be modeled as bundle metadata, not
+  directory naming conventions.
 
-## 11. (alias, member-index) 由 Coordinator 单方面分配并永久绑定
+## 11. Coordinator Owns Alias And Member-Index Assignment
 
-- 成员**不能**自取 alias 或 member-index；这两个字段由 Coordinator 在
-  `shared/member-roster.json` 中签发，发布在任何 `.pub` 被收集**之前**。
-- 脚本将 roster 视为强不变量：`doctor coordinator` / `manifest generate` /
-  `ceremony genesis-boot` 都会调 `check_member_roster`，校验文件名 stem 与
-  alias byte-equal、share-set member_index 是 1..N 连续整数、不存在多余
-  `.pub`。
-- `ceremony genesis-boot` 之后 (alias, member_index, .pub, .share) 永久绑定
-  到生成的 quorum_key；冲突或就地修改只能通过重做 Genesis 修复，不能事后
-  打补丁。
-- 替换成员走 `key-forward`（同 index, 新 key）或追加新 index（新建一份
-  ceremony field 不同的 roster），绝不修改历史 roster 条目。
-- `review` / `share-request` / `genesis-output` bundle 必须随附 roster
-  slice（`BUNDLE.json.members`）与 `member-roster.json` 副本，让成员可在
-  接收端独立核对自己的 (alias, member_index)。
-
+- Members must not choose their own alias or member index. Coordinator issues
+  them in `shared/member-roster.json` before any `.pub` is collected.
+- Scripts treat the roster as an invariant: `doctor coordinator`,
+  `manifest generate`, and `ceremony genesis-boot` validate alias/file stem
+  equality, contiguous share-set member indexes, and absence of extra `.pub`
+  files.
+- After `ceremony genesis-boot`, `(alias, member_index, .pub, .share)` is bound
+  to the generated `quorum_key`. Collisions or in-place edits require redoing
+  Genesis.
+- Member replacement uses `key-forward` for the same index with a new key, or a
+  new index in a new ceremony roster. Never edit historical roster entries in
+  place.
+- Review, share-request, and genesis-output bundles must carry the relevant
+  roster slice in `BUNDLE.json.members` plus a `member-roster.json` copy so
+  members can verify their assignment locally.

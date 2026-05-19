@@ -325,7 +325,7 @@ prior ceremony. Otherwise:
    never enter this workspace.
 3. Confirm each set under `shared/{manifest-set,share-set,patch-set}/` has a
    `quorum_threshold` file (single-line decimal integer). Recommended values
-   live in SECURITY.md `Threshold 推荐`.
+   live in SECURITY.md threshold recommendations.
 4. Run `boot-genesis`:
 
 ```bash

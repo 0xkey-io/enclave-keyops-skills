@@ -15,7 +15,7 @@ actual executable path or wrapper being used in the role config.
 
 ## When to update `qos_client`
 
-See `SECURITY.md §3 qos_client 更换触发表` for the authoritative rules. Quick
+See `SECURITY.md` section 3 for the authoritative replacement rules. Quick
 summary:
 
 - qOS revision upgrade (PCR / manifest fields change) — Builder republishes;

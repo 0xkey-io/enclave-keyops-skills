@@ -134,15 +134,16 @@ order:
    "workdir exists, empty")
 3. **missing**: each item names what is missing AND who to ask for it
    (Coordinator vs user vs external vault)
-4. **vault mode**: ask the user one line — "你的 long-term key 在
-   YubiKey (`--yubikey`) 还是加密磁盘文件 (`--secret-path`)? prod 推荐
-   YubiKey，见 SECURITY.md §5.1"。后续每条命令的形态取决于这个答案。
+4. **vault mode**: ask one line — "Is your long-term key on a YubiKey
+   (`--yubikey`) or in an encrypted-disk file (`--secret-path`)? Production
+   prefers YubiKey; see SECURITY.md section 5.1." Later command shapes depend
+   on this answer.
 5. **next**: 1-line concrete next step
 
 For alias specifically:
-- ❌ Don't write "alias (例如 manifester2)" — the user does not pick.
-  Use "Coordinator 分配给你的 alias (来自 `member-roster.json`)；如果不
-  知道请先去问 Coordinator".
+- ❌ Don't write "alias (for example manifester2)" — the user does not pick.
+  Use "Coordinator-assigned alias from `member-roster.json`; if unknown, ask
+  the Coordinator first."
 - ❌ Don't initialize with `manifester1` as a placeholder identity. The helper
   now requires a roster-backed `--alias`; wait for the roster before
   initializing or generating `outbox/<alias>.pub`.
@@ -172,12 +173,12 @@ session — pick one at first-turn and use it consistently.
 | qos_client requirement | Builder-released `qos_client` revision must ship with PIV support; `doctor holder` reports this | Any audited release works |
 
 > ⚠️ Mutual exclusion: passing both `--yubikey` and `--secret-path` is a
-> hard error in `enclave_keyops.py`. If the user starts the session
-> saying "我用 YubiKey", do not also fill in `--secret-path` "为了保险"
+> hard error in `enclave_keyops.py`. If the user starts the session saying
+> "I use a YubiKey", do not also fill in `--secret-path` as a fallback
 > — the script will refuse and you'll have to ask again.
 >
 > ⚠️ First-time YubiKey use: **before** running `key yubikey-provision`,
-> walk the user through `SECURITY.md §5.2.1 "YubiKey 首次准备清单"`. The
+> walk the user through `SECURITY.md` section 5.2.1. The
 > three failure modes observed in real-world testing on 2026-05-16 were
 > (a) PIV `Management key algorithm: AES192` (YubiKey 5.7+ factory
 > default) vs qos_client's hard-coded TDES expectation → MGM auth
@@ -189,6 +190,19 @@ session — pick one at first-turn and use it consistently.
 > user has never run provision against this exact YubiKey before, ask
 > them to run `ykman piv info` first and confirm the four properties
 > §5.2.1 step 1 lists.
+>
+> The wrapper preflights `ykman piv info` and `ykman piv keys info 9c/9d`.
+> If `Management key algorithm` is not `TDES`, stop and show the
+> `ykman piv access change-management-key --algorithm TDES ...` command from
+> SECURITY.md. If slot 9C or 9D already contains key material, warn that it
+> may belong to another PIV use or a half-failed qos_client attempt and require
+> the typed confirmation phrase before proceeding.
+>
+> Make the touch requirement explicit immediately before provisioning:
+> qos_client needs **two YubiKey touches** after PIN entry. First touch creates
+> the slot 9C signing-key certificate; second touch creates the slot 9D key
+> management / ECDH certificate. If the operator misses either blink window,
+> provisioning can fail and leave a half-written slot.
 
 ## State Detection
 
