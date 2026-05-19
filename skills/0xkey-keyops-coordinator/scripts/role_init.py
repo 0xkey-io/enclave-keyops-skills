@@ -89,14 +89,60 @@ def write_text(path: Path, text: str, *, mode: int | None = None, force: bool = 
         path.chmod(mode)
 
 
-def default_alias(role: str, member_index: int | None) -> str:
+def default_alias(role: str) -> str:
     if role == "coordinator":
         return "coordinator"
-    if role == "manifest-set-member":
-        return "manifester1"
-    if role == "share-set-member":
-        return f"share-member{member_index or 1}"
     return "builder"
+
+
+def recommended_workspace(role: str, alias: str | None) -> str:
+    if role == "coordinator":
+        return "~/.0xkey-ops/coordinator"
+    if role == "builder":
+        return "~/.0xkey-ops/builder"
+    if role == "manifest-set-member":
+        return f"~/.0xkey-ops/manifest-set/{alias or '<alias-from-roster>'}"
+    if role == "share-set-member":
+        return f"~/.0xkey-ops/share-set/{alias or '<alias-from-roster>'}"
+    raise ValueError(f"unknown role: {role}")
+
+
+def require_workspace_and_identity(ns: argparse.Namespace) -> None:
+    if not ns.root:
+        sys.stderr.write(
+            "--root is required. If the operator did not provide a workspace, "
+            "recommend this path and wait for confirmation before initializing:\n"
+            f"  {recommended_workspace(ns.role, ns.alias)}\n"
+        )
+        if ns.role in ("manifest-set-member", "share-set-member") and not ns.alias:
+            sys.stderr.write(
+                "For member roles, first ask the Coordinator for the assigned "
+                "alias from member-roster.json; do not use a default alias.\n"
+            )
+        raise SystemExit(2)
+
+    if ns.role == "manifest-set-member" and not ns.alias:
+        sys.stderr.write(
+            "--role manifest-set-member requires --alias from the "
+            "Coordinator-issued member-roster.json. Do not default to "
+            "manifester1.\n"
+        )
+        raise SystemExit(2)
+
+    if ns.role == "share-set-member":
+        missing: list[str] = []
+        if not ns.alias:
+            missing.append("--alias")
+        if ns.member_index is None:
+            missing.append("--member-index")
+        if missing:
+            sys.stderr.write(
+                "--role share-set-member requires "
+                + ", ".join(missing)
+                + " from the Coordinator-issued member-roster.json. Do not "
+                "default to share-member1 or infer member-index from alias.\n"
+            )
+            raise SystemExit(2)
 
 
 def load_template() -> dict[str, Any]:
@@ -547,7 +593,7 @@ Hard rules:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--role", required=True, choices=ROLE_CHOICES)
-    p.add_argument("--root", required=True, help="role workspace root, outside the source repo")
+    p.add_argument("--root", default=None, help="role workspace root, outside the source repo")
     p.add_argument("--alias", default=None)
     p.add_argument("--member-index", type=int, default=None)
     # Coordinator-only fields. Required for --role coordinator.
@@ -623,16 +669,13 @@ def require_coordinator_flags(ns: argparse.Namespace) -> None:
 
 def main() -> None:
     ns = build_parser().parse_args()
+    require_workspace_and_identity(ns)
     if ns.role == "coordinator":
         require_coordinator_flags(ns)
     root = expand_abs(ns.root)
     refuse_under_cwd(root, ns.i_know_unsafe_repo_path)
-    alias = ns.alias or default_alias(ns.role, ns.member_index)
+    alias = ns.alias or default_alias(ns.role)
     member_index = ns.member_index
-    if ns.role == "share-set-member" and member_index is None:
-        # Infer common `share-memberN` aliases.
-        suffix = alias.removeprefix("share-member")
-        member_index = int(suffix) if suffix.isdigit() else 1
 
     root.mkdir(parents=True, exist_ok=True)
     chmod_private(root)

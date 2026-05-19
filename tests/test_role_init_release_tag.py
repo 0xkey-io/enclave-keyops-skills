@@ -93,6 +93,7 @@ class RoleInitDefaultFetchTests(unittest.TestCase):
             self._run_role_init(
                 "--role", "manifest-set-member",
                 "--root", str(root),
+                "--alias", "manifester1",
                 "--i-know-unsafe-repo-path",
             )
 
@@ -128,6 +129,7 @@ class RoleInitDefaultFetchTests(unittest.TestCase):
             self._run_role_init(
                 "--role", "manifest-set-member",
                 "--root", str(root),
+                "--alias", "manifester1",
                 "--i-know-unsafe-repo-path",
                 "--qos-client-release-tag", explicit_tag,
             )
@@ -162,6 +164,7 @@ class RoleInitNoFetchTests(unittest.TestCase):
         out = self._run_role_init_capture(
             "--role", "manifest-set-member",
             "--root", str(root),
+            "--alias", "manifester1",
             "--i-know-unsafe-repo-path",
             "--no-qos-client-fetch",
         )
@@ -189,6 +192,7 @@ class RoleInitNoFetchTests(unittest.TestCase):
         out = self._run_role_init_capture(
             "--role", "manifest-set-member",
             "--root", str(root),
+            "--alias", "manifester1",
             "--i-know-unsafe-repo-path",
             "--no-qos-client-fetch",
             "--qos-client-release-tag", explicit_tag,
@@ -225,6 +229,7 @@ class RoleInitInstallPathTests(unittest.TestCase):
             self._run_role_init(
                 "--role", "manifest-set-member",
                 "--root", str(root),
+                "--alias", "manifester1",
                 "--i-know-unsafe-repo-path",
             )
         cfg = json.loads((root / "config.json").read_text())
@@ -289,6 +294,7 @@ class RoleInitFetchFailureTests(unittest.TestCase):
             out = self._run_role_init_capture(
                 "--role", "manifest-set-member",
                 "--root", str(root),
+                "--alias", "manifester1",
                 "--i-know-unsafe-repo-path",
             )
 

@@ -13,6 +13,19 @@ reading only:
   the current ceremony round
 - exact paths explicitly provided by the user in the prompt
 
+If the user has not provided a workspace, do not create one silently and do
+not run `role_init.py` yet. Recommend exactly one default path for the role,
+then wait for the user to confirm or override it:
+
+- Coordinator: `~/.0xkey-ops/coordinator`
+- Builder: `~/.0xkey-ops/builder`
+- Manifest Set member: `~/.0xkey-ops/manifest-set/<alias>`
+- Share Set member: `~/.0xkey-ops/share-set/<alias>`
+
+For Manifest / Share roles, only fill `<alias>` after the Coordinator roster
+backs it. If the alias is not known yet, show the placeholder path and ask for
+`member-roster.json` (or a Coordinator-signed roster announcement) first.
+
 Do **not** broadly search `$HOME`, legacy key archives, old ceremony
 directories, previous build outputs, or unrelated role directories to "find"
 key material or bundles. If such files are discovered while diagnosing a
@@ -92,11 +105,9 @@ PRINCIPLES §11）。成员**只能确认不能自取**。在 agent 这一层落
   3. 用户引用了一个由 Coordinator 签名的 roster 公告，agent 可以核对其中
      该 alias 是否存在。
 - 在以上任何一种背书到位之前，state 必须叠加 `waiting-for-roster`，且：
-  - **不要**调 `role_init.py` 时携带 `--alias <用户自报值>`；可以先停下
-    要 roster，也可以仅做 `--role <role>` 不带 alias 的最小初始化（脚本
-    会落一个明确的角色默认值如 `manifester1` / `share-member1`，配合
-    README 提示"等 roster 到位后用 `--force --alias <roster 值>`
-    覆写"）。优先选择"先停下要 roster"。
+  - **不要**调 `role_init.py`；脚本层会拒绝缺少 roster-backed
+    `--alias`（Share 还需要 `--member-index`）的成员初始化。先停下要
+    roster，再用 roster 上的值初始化。
   - **不要**生成 `outbox/<user-alias>.pub`；先让 Coordinator 公布
     roster，再以 roster 上的 alias 为唯一文件名生成。
   - **不要**接受用户"我自己起个 alias 就行" 的提议——alias 撞名会让

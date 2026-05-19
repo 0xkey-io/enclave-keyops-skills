@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from ._helpers import load_role_init
 
@@ -87,6 +89,49 @@ class RefuseUnderCwdTests(unittest.TestCase):
         target = repo / "deep" / "workdir"
         # force=True should not raise.
         ri.refuse_under_cwd(target, force=True)
+
+
+class RoleInitRequiredInputTests(unittest.TestCase):
+    def _run_capture_stderr(self, *args: str) -> str:
+        from io import StringIO
+
+        argv = ["role_init.py", *args]
+        captured = StringIO()
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(sys, "stderr", captured):
+            with self.assertRaises(SystemExit) as cm:
+                ri.main()
+        self.assertEqual(cm.exception.code, 2)
+        return captured.getvalue()
+
+    def test_missing_root_prints_recommended_workspace(self) -> None:
+        err = self._run_capture_stderr("--role", "builder")
+        self.assertIn("--root is required", err)
+        self.assertIn("~/.0xkey-ops/builder", err)
+        self.assertIn("wait for confirmation", err)
+
+    def test_missing_manifest_alias_refuses_default_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            err = self._run_capture_stderr(
+                "--role", "manifest-set-member",
+                "--root", td,
+                "--i-know-unsafe-repo-path",
+            )
+        self.assertIn("requires --alias", err)
+        self.assertIn("member-roster.json", err)
+        self.assertIn("Do not default to manifester1", err)
+
+    def test_missing_share_member_index_refuses_inference(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            err = self._run_capture_stderr(
+                "--role", "share-set-member",
+                "--root", td,
+                "--alias", "share-member2",
+                "--i-know-unsafe-repo-path",
+            )
+        self.assertIn("requires --member-index", err)
+        self.assertIn("member-roster.json", err)
+        self.assertIn("Do not default to share-member1", err)
+        self.assertIn("infer member-index", err)
 
 
 if __name__ == "__main__":

@@ -37,7 +37,8 @@ Builder has two modes:
   the Docker image digest, or a signed release bundle hash.
 - build instructions or release bundle
 - target AWS account / ECR registry
-- output workdir
+- output workdir. If the user did not provide one, recommend
+  `~/.0xkey-ops/builder`, then wait for confirmation before initializing.
 - target environment name and release boundary
 
 Do not ask for `.secret` or `.share` files.
@@ -91,6 +92,10 @@ verifying it against the published SHA256 sidecar. This gives the
 Builder workspace an immediately-runnable reference client — useful for
 sanity-checking pivot hashes against the previous release before the new
 build is published.
+
+If `$WORKDIR` is missing from the prompt, recommend
+`~/.0xkey-ops/builder` and ask the user to confirm or override it before
+running `role_init.py`.
 
 ```bash
 python3 "$SKILL_DIR/scripts/role_init.py" \

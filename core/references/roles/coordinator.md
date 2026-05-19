@@ -15,7 +15,9 @@ boot-standard / attestation / post-share, and verify control plane + data plane.
 
 Ask for paths and identifiers, not secret contents:
 
-- `workdir`: repo-external directory
+- `workdir`: repo-external directory. If the user did not provide one,
+  recommend `~/.0xkey-ops/coordinator`, then wait for confirmation before
+  initializing.
 - `qos_client` and expected SHA256
 - `qos-release/nitro.pcrs`
 - five pivot binaries and pivot hashes
@@ -96,6 +98,9 @@ Optional `qos_client` flags for non-default situations:
 
 Notes:
 - The default assumption is **prod**.
+- If `$WORKDIR` is missing from the prompt, recommend
+  `~/.0xkey-ops/coordinator` and ask the user to confirm or override it before
+  running `role_init.py`.
 - `--account-id`, `--region`, `--cluster`, `--enclave-role-name`, and
   `--kustomize-overlay-path` are required for `--role coordinator`.
 - `--kustomize-overlay-path` MUST be an absolute path to the K8s overlay
@@ -234,8 +239,8 @@ these sources:
 
 - paths explicitly provided by the user in the prompt
 - current-round role workspaces, for example
-  `~/0xkey/keyops/manifesterN/out/*.pub` or
-  `~/0xkey/keyops/share-memberN/out/*.pub`
+  `~/.0xkey-ops/manifest-set/manifesterN/outbox/*.pub` or
+  `~/.0xkey-ops/share-set/share-memberN/outbox/*.pub`
 - an explicit current-round Coordinator inbox, for example
   `$WORKDIR/inbox/public-keys/<alias>.pub`
 

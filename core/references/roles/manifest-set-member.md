@@ -24,8 +24,9 @@ Ask for paths, not file contents:
   release binary directly.
 - optional `qos_client_sha256_expected`: expected SHA256
 - `alias`: e.g. `manifester1`
-- `workdir`: repo-external directory, e.g. `~/0xkey/keyops/manifester1`
-  (默认不带环境分段；如需隔离非生产演练，可按组织 runbook 添加环境分段。)
+- `workdir`: repo-external directory. If the user did not provide one,
+  recommend `~/.0xkey-ops/manifest-set/<alias>` after roster confirms the
+  alias, then wait for confirmation before initializing.
 
 Never print or request the contents of `.secret`.
 
@@ -117,9 +118,14 @@ chmod 600 "$HOME/0xkey/operator-keys/$ALIAS/$ALIAS.secret"
 
 ## First-turn reply shape
 
-When the user has only said "I'm a Manifest Set member, $WORKDIR is X"
-(no alias, no paths yet), DO NOT just dump a list of placeholders to
-fill. Reply in this order:
+When the user has only said "I'm a Manifest Set member" and did not provide a
+workspace, recommend `~/.0xkey-ops/manifest-set/<alias-from-roster>` and ask
+for confirmation together with the Coordinator roster. Do not run
+`role_init.py` yet.
+
+When the user has said "I'm a Manifest Set member, $WORKDIR is X" (no alias,
+no paths yet), DO NOT just dump a list of placeholders to fill. Reply in this
+order:
 
 1. **state**: pick from the State Detection table below; the most common
    first-turn states are `uninitialized + waiting-for-roster +
@@ -137,6 +143,9 @@ For alias specifically:
 - ❌ Don't write "alias (例如 manifester2)" — the user does not pick.
   Use "Coordinator 分配给你的 alias (来自 `member-roster.json`)；如果不
   知道请先去问 Coordinator".
+- ❌ Don't initialize with `manifester1` as a placeholder identity. The helper
+  now requires a roster-backed `--alias`; wait for the roster before
+  initializing or generating `outbox/<alias>.pub`.
 - ❌ Don't tell the user to drop `qos_client` somewhere without naming
   the source. The default workflow is `role_init.py` auto-fetching the
   latest stable release from `0xkey-io/qos` (verified SHA256). If the

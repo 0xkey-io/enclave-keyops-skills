@@ -6,6 +6,12 @@ runs safe commands, and asks only for missing inputs or human gates.
 
 > **Default env is prod.** Operator prompts should collect explicit environment
 > identifiers instead of relying on hidden presets.
+>
+> If the operator does not provide a workdir, recommend the role default and wait
+> for confirmation before initializing: `~/.0xkey-ops/coordinator`,
+> `~/.0xkey-ops/builder`, `~/.0xkey-ops/manifest-set/<alias>`, or
+> `~/.0xkey-ops/share-set/<alias>`. For Manifest / Share roles, `<alias>` must
+> come from the Coordinator roster first.
 
 ## Builder
 

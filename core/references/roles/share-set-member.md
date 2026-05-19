@@ -30,8 +30,9 @@ Ask for paths, not file contents:
   `share-member2`); members must NOT pick this themselves
 - `member_index`: integer slot assigned by the Coordinator in
   `member-roster.json` (e.g. `2`); becomes permanent after Genesis
-- `workdir`: repo-external directory, e.g. `~/0xkey/keyops/share-member2`
-  (默认不带环境分段；如需隔离非生产演练，可按组织 runbook 添加环境分段。)
+- `workdir`: repo-external directory. If the user did not provide one,
+  recommend `~/.0xkey-ops/share-set/<alias>` after roster confirms the
+  `(alias, member_index)` pair, then wait for confirmation before initializing.
 
 Never print or request the contents of `.secret` or `.share`.
 
@@ -124,9 +125,14 @@ chmod 600 "$HOME/0xkey/operator-keys/$ALIAS/$ALIAS."{secret,share}
 
 ## First-turn reply shape
 
-When the user has only said "I'm a Share Set member, $WORKDIR is X" (no
-alias, no paths yet), DO NOT just dump a list of placeholders to fill.
-Reply in this order:
+When the user has only said "I'm a Share Set member" and did not provide a
+workspace, recommend `~/.0xkey-ops/share-set/<alias-from-roster>` and ask for
+confirmation together with the Coordinator roster. Do not run `role_init.py`
+yet.
+
+When the user has said "I'm a Share Set member, $WORKDIR is X" (no alias, no
+paths yet), DO NOT just dump a list of placeholders to fill. Reply in this
+order:
 
 1. **state**: pick from the State Detection table below; the most common
    first-turn states are `uninitialized + waiting-for-roster +
@@ -146,6 +152,10 @@ For alias / member_index specifically:
 - ❌ Don't write "alias (例如 share-member2)" — that suggests the user can
   pick. Use "Coordinator 分配给你的 alias (来自 `member-roster.json`)；
   如果不知道请先去问 Coordinator".
+- ❌ Don't initialize with `share-member1` or infer `member-index` from the
+  alias as a placeholder identity. The helper now requires roster-backed
+  `--alias` and `--member-index`; wait for the roster before initializing or
+  generating `outbox/<alias>.pub`.
 - ❌ Don't say "or you can drop it at .../shared/qos_client" without first
   saying where it comes from. The default workflow is `role_init.py`
   auto-fetching the latest stable release from `0xkey-io/qos` (verified

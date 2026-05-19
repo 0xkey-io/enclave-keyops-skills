@@ -59,27 +59,60 @@ tests/                           Stdlib unittest suite (no external deps).
 
 ## Install / use with agents
 
-Pick the one role skill that matches your seat in the ceremony. Skill names
-listed below are the canonical `name:` values from each `SKILL.md`.
+Pick the one role skill that matches your seat in the ceremony. Do not install
+or load multiple role skills in the same operator session unless you are
+maintaining the repository itself.
 
-### Per-agent skill paths
+### Recommended: install from GitHub
 
-`<skill>` is one of `0xkey-keyops-coordinator`, `0xkey-keyops-manifest`,
-`0xkey-keyops-share`, or `0xkey-keyops-builder`.
+Use the public repository path directly:
 
-| Agent | User-level (per machine) | Project-level (per repo) |
-|-------|--------------------------|--------------------------|
-| Cursor | `~/.cursor/skills/<skill>` | `<repo>/.cursor/skills/<skill>` |
-| Codex CLI | `~/.codex/skills/<skill>` | `<repo>/.codex/skills/<skill>` |
-| Claude Code | `~/.claude/skills/<skill>` | `<repo>/.claude/skills/<skill>` |
-| OpenClaw | `~/.openclaw/skills/<skill>` | `<repo>/.openclaw/skills/<skill>` |
-| Antigravity | `~/.antigravity/skills/<skill>` | `<repo>/.antigravity/skills/<skill>` |
-| GitHub Copilot Skills | `~/.copilot/skills/<skill>` | `<repo>/.github/copilot/skills/<skill>` |
-| Generic AgentSkills (multi-platform shared) | `~/.agents/skills/<skill>` | `<repo>/.agents/skills/<skill>` |
+```bash
+npx skills add 0xkey-io/enclave-keyops-skills --skill 0xkey-keyops-coordinator
+npx skills add 0xkey-io/enclave-keyops-skills --skill 0xkey-keyops-builder
+npx skills add 0xkey-io/enclave-keyops-skills --skill 0xkey-keyops-manifest
+npx skills add 0xkey-io/enclave-keyops-skills --skill 0xkey-keyops-share
+```
 
-### One-time symlink (recommended; tracks `git pull` automatically)
+Choose exactly one command for your role:
 
-From inside the cloned repo:
+- Coordinator: `0xkey-keyops-coordinator`
+- Builder / Release operator: `0xkey-keyops-builder`
+- Manifest Set member: `0xkey-keyops-manifest`
+- Share Set member: `0xkey-keyops-share`
+
+If your agent supports platform targets, add the agent selector flags it
+documents (for example `-a cursor`, `-a codex`, `-a claude-code`, or
+`-a openclaw`). The repository path stays the same:
+
+```bash
+npx skills add 0xkey-io/enclave-keyops-skills --skill 0xkey-keyops-manifest \
+  -a cursor -a codex -a claude-code -a openclaw
+```
+
+### Give this URL to your agent
+
+You can hand an agent this URL and ask it to install the matching role skill:
+
+```text
+https://github.com/0xkey-io/enclave-keyops-skills
+```
+
+Expected agent behavior:
+
+1. Ask which ceremony role you are operating as: Coordinator, Builder,
+   Manifest Set member, or Share Set member.
+2. Install the corresponding skill with
+   `npx skills add 0xkey-io/enclave-keyops-skills --skill <role-skill>`.
+3. Do not guess the role and do not install all four skills unless explicitly
+   asked to prepare a maintainer / test environment.
+4. After install, start from the matching `SKILL.md` and enforce that role's
+   action whitelist.
+
+### Local development install
+
+Use a symlink only when you are developing this repository and want installed
+skills to track `git pull` automatically. From inside the cloned repo:
 
 ```bash
 REPO_ROOT="$PWD"
@@ -100,23 +133,13 @@ install_skill 0xkey-keyops-coordinator "$HOME/.claude/skills"
 ```
 
 `ln -s` keeps each installed skill in sync with `git pull` without copying.
-Use `cp -R` only on platforms that reject symlinked skill directories.
+Use `cp -R` instead if your agent or security policy rejects symlinked skill
+directories.
 
 OpenClaw's `skills.load.allowSymlinkTargets` defaults to off for workspace /
 project-agent roots; symlinks under `~/.openclaw/skills/` and
 `~/.agents/skills/` are allowed by default but the SKILL.md realpath must
 stay inside its resolved skill directory.
-
-### `npx skills add` (when the repo is publicly resolvable)
-
-```bash
-npx skills add <github-org>/<repo> --skill 0xkey-keyops-manifest \
-  -a cursor -a codex -a claude-code -a openclaw
-```
-
-`<github-org>/<repo>` is the GitHub path to this repository; `--skill` names
-one of the four role skills above. Skip this route if the repo is private and
-fall back to the symlink section.
 
 ### ClawHub install (OpenClaw)
 
@@ -129,11 +152,11 @@ matches the `name:` field (e.g. `0xkey-keyops-manifest`).
 
 ### Project-level install
 
-Copy or symlink the skill into the project repo (for example
-`<repo>/.cursor/skills/0xkey-keyops-manifest`) when you want a team to share
-the same version via the project's git history. The agent's project-level
-skills directory takes precedence over the user-level one, so a project-pinned
-version cannot be silently shadowed by a stale user-level install.
+Use project-level install only when a team intentionally pins this skill via
+the consuming project's git history. Prefer the agent's normal install command
+if it supports project-level targets; otherwise copy the desired
+`skills/<role>/` directory into that agent's project skill directory. A
+project-pinned version should take precedence over user-level installs.
 
 ### Agents without first-class skill support
 
@@ -177,12 +200,13 @@ role skill directly; no role-router round-trip needed.
 ```
 
 ```text
-我是 0xkey KeyOps 的 Manifest Set 成员，alias 是 manifester1。
+我是 0xkey KeyOps 的 Manifest Set 成员，Coordinator 分配给我的 alias 是 <alias>。
 请使用 0xkey-keyops-manifest skill，只执行 Manifest Set member 角色流程。
 ```
 
 ```text
-我是 0xkey KeyOps 的 Share Set 成员，alias 是 share-member1。
+我是 0xkey KeyOps 的 Share Set 成员，Coordinator 分配给我的 alias 是 <alias>，
+member-index 是 <n>。
 请使用 0xkey-keyops-share skill，只执行 Share Set member 角色流程。
 ```
 
