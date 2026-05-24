@@ -663,6 +663,8 @@ def _manifest_dirs(cfg: Config) -> Tuple[Path, Path, Path]:
 def _pivot_args_for_service(cfg: Config, svc: Mapping[str, Any]) -> str:
     name = svc["name"]
     d = cfg.raw["defaults"]
+    if name == "signer" and d.get("signer_pivot_args"):
+        return str(d["signer_pivot_args"])
     if name == "tls-fetcher" and d.get("tls_fetcher_pivot_args"):
         return str(d["tls_fetcher_pivot_args"])
     if name == "notarizer" and d.get("notarizer_pivot_args"):
