@@ -105,7 +105,7 @@ class WorkspaceRulesHasRosterFirstRule(unittest.TestCase):
         )
 
     def test_blocks_baking_user_alias(self) -> None:
-        for needle in ("config.json", "outbox/", "role_init.py"):
+        for needle in ("config.json", "outbox/", "keyops init"):
             with self.subTest(needle=needle):
                 self.assertIn(
                     needle,
@@ -186,7 +186,7 @@ class EachSkillHasCrossRoleRefusalCheatSheet(unittest.TestCase):
     SECTION_HEADING = "## Cross-role refusal cheat sheet"
 
     # Each role MUST point at the correct skill for at least these specific
-    # adversarial requests. We do not enforce phrasing â€” only the presence
+    # adversarial requests. We do not enforce phrasing âÿÿ only the presence
     # of the target skill name near a quoted refusal trigger.
     REQUIRED_ROUTING: dict[str, list[tuple[str, str]]] = {
         "0xkey-keyops-coordinator": [
