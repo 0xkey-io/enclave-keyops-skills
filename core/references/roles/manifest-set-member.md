@@ -72,9 +72,16 @@ must never read or print the file contents. Store the public key in
 
 ## Initialize Workspace
 
-> `$SKILL_DIR` below is the absolute path of this skill on the agent's local
-> filesystem. The agent that loaded this skill already knows it; resolve the
-> placeholder before invoking Python.
+> All commands below use the self-contained `keyops` binary — no Python
+> required. If `keyops` is not yet on `$PATH`, fetch it from GitHub
+> Releases first:
+>
+> ```bash
+> curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+> curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+> shasum -a 256 -c keyops.*.sha256
+> install -m 0755 keyops.* ./bin/keyops    # or any directory on $PATH
+> ```
 
 Run the role init helper. By default it will resolve and download the
 latest Builder-published `qos_client` from `0xkey-io/qos` GitHub Releases
@@ -83,7 +90,7 @@ and install the verified binary at `$WORKDIR/shared/qos_client`. The
 operator does not have to remember a hash.
 
 ```bash
-python3 "$SKILL_DIR/scripts/role_init.py" \
+keyops init \
   --role manifest-set-member \
   --root "$WORKDIR" \
   --alias "$ALIAS"
@@ -96,7 +103,7 @@ Optional flags for non-default situations:
   when the ceremony lock requires a specific version.
 - `--qos-client-release-repo <owner/name>` to point at a private mirror.
 - `--no-qos-client-fetch` to scaffold the workspace without touching the
-  network. The follow-up `fetch_qos_client.py` command is printed in the
+  network. The follow-up `keyops fetch-qos-client` command is printed in the
   init "todo" block — run it after the network is available.
 
 Then ensure:
@@ -121,7 +128,7 @@ chmod 600 "$HOME/0xkey/operator-keys/$ALIAS/$ALIAS.secret"
 When the user has only said "I'm a Manifest Set member" and did not provide a
 workspace, recommend `~/.0xkey-ops/manifest-set/<alias-from-roster>` and ask
 for confirmation together with the Coordinator roster. Do not run
-`role_init.py` yet.
+`keyops init` yet.
 
 When the user has said "I'm a Manifest Set member, $WORKDIR is X" (no alias,
 no paths yet), DO NOT just dump a list of placeholders to fill. Reply in this
@@ -148,7 +155,7 @@ For alias specifically:
   now requires a roster-backed `--alias`; wait for the roster before
   initializing or generating `outbox/<alias>.pub`.
 - ❌ Don't tell the user to drop `qos_client` somewhere without naming
-  the source. The default workflow is `role_init.py` auto-fetching the
+  the source. The default workflow is `keyops init` auto-fetching the
   latest stable release from `0xkey-io/qos` (verified SHA256). If the
   user explicitly needs to pin a specific release for this ceremony,
   ask the Coordinator for the locked tag and pass
@@ -173,7 +180,7 @@ session — pick one at first-turn and use it consistently.
 | qos_client requirement | Builder-released `qos_client` revision must ship with PIV support; `doctor holder` reports this | Any audited release works |
 
 > ⚠️ Mutual exclusion: passing both `--yubikey` and `--secret-path` is a
-> hard error in `enclave_keyops.py`. If the user starts the session saying
+> hard error in `keyops`. If the user starts the session saying
 > "I use a YubiKey", do not also fill in `--secret-path` as a fallback
 > — the script will refuse and you'll have to ask again.
 >
@@ -210,19 +217,19 @@ Before running commands, inspect only `$WORKDIR` and classify the state.
 
 > **Precedence rule (roster-first, see
 > `references/workspace-rules.md` "Roster-first rule")**: if state includes
-> `waiting-for-roster`, do **not** run `role_init.py --alias <user-claim>`,
+> `waiting-for-roster`, do **not** run `keyops init --alias <user-claim>`,
 > do **not** generate `outbox/<user-claim>.pub`, and do **not** treat the
 > user-claimed alias as authoritative. Stop and ask the Coordinator to
 > publish `member-roster.json` (or to confirm the alias in a signed
-> announcement) first. This rule overrides the literal "run `role_init.py`
+> announcement) first. This rule overrides the literal "run `keyops init`
 > for this alias" cell in the `uninitialized` row below whenever the two
 > states co-occur.
 
 | State | Directory evidence | Next action |
 |-------|--------------------|-------------|
-| `uninitialized` | missing `config.json` | run `role_init.py` for this alias — but only if `waiting-for-roster` is NOT also active (see precedence rule above) |
+| `uninitialized` | missing `config.json` | run `keyops init` for this alias — but only if `waiting-for-roster` is NOT also active (see precedence rule above) |
 | `waiting-for-roster` | user said `<alias>` is `unknown`, OR alias does not appear in any received `BUNDLE.json.members.manifest_set` slice, OR no Coordinator-issued roster has been provided yet | ask Coordinator for the assigned alias from `member-roster.json`; do not let the user pick a name themselves; do not bake the user-claimed alias into `config.json` |
-| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `role_init.py` (default = auto-fetch latest from `0xkey-io/qos`); on offline machines run `python3 $SKILL_DIR/scripts/fetch_qos_client.py --release-tag latest --out $WORKDIR/shared/qos_client` and then re-run `role_init.py --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
+| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `keyops init` (default = auto-fetch latest from `0xkey-io/qos`); on offline machines run `keyops fetch-qos-client --release-tag latest --out $WORKDIR/shared/qos_client` and then re-run `keyops init --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
 | `key-init-needed` | missing `outbox/<alias>.pub`; for file mode also missing external `.secret` path | YubiKey path: confirm slot is provisioned and run `key yubikey-provision`. File path: propose `$HOME/0xkey/operator-keys/<env>/<alias>/<alias>.secret` and run `key file-generate` after confirmation. (See "Vault mode" above.) |
 | `waiting-for-review` | has key material (YubiKey OR external secret) and `outbox/<alias>.pub`, missing `inbox/manifest-review-*.tgz` | ask user to place Coordinator review bundle in `inbox/` |
 | `ready-to-review` | has `shared/qos_client`, the chosen holder credential (YubiKey OR external secret), and review bundle | run holder doctor, extract, verify, summarize |
@@ -248,8 +255,7 @@ declared at first-turn under "Vault mode" — do not silently swap.
 not exportable; only the public key lands in this workdir.
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   key yubikey-provision \
   --alias "$ALIAS" \
   --pub-path "outbox/$ALIAS.pub"
@@ -262,8 +268,7 @@ and only write the public key into this workdir:
 KEY_DIR="$HOME/0xkey/operator-keys/$ALIAS"
 mkdir -p "$KEY_DIR"
 chmod 700 "$KEY_DIR"
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   key file-generate \
   --master-seed-path "$KEY_DIR/$ALIAS.secret" \
   --pub-path "outbox/$ALIAS.pub"
@@ -280,12 +285,10 @@ execute them directly when inputs are present; do not ask the user to copy/paste
 them.
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   doctor holder
 
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle extract \
   --archive inbox/manifest-review-*.tgz \
   --bundle-dir incoming/review
@@ -295,8 +298,7 @@ Find the extracted root:
 
 ```bash
 REVIEW_ROOT=$(find "$WORKDIR/incoming/review" -name SHA256SUMS -maxdepth 3 -type f -print -quit | xargs dirname)
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle verify --bundle-dir "$REVIEW_ROOT"
 ```
 
@@ -320,8 +322,7 @@ YubiKey path:
 
 ```bash
 for svc in signer policy-engine notarizer tls-fetcher transaction-parser; do
-  python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-    --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
     manifest approve \
     --alias "$ALIAS" \
     --yubikey \
@@ -333,8 +334,7 @@ File path (non-production / dev only):
 
 ```bash
 for svc in signer policy-engine notarizer tls-fetcher transaction-parser; do
-  python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-    --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
     manifest approve \
     --alias "$ALIAS" \
     --secret-path "$KEY_DIR/$ALIAS.secret" \
@@ -346,8 +346,7 @@ Create the return bundle:
 
 ```bash
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle create --kind approvals \
   --bundle-dir "outbox/${ALIAS}-approvals-${STAMP}" \
   --archive "outbox/${ALIAS}-approvals-${STAMP}.tgz"

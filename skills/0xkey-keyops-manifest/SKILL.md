@@ -52,6 +52,15 @@ If you genuinely wear two hats (e.g. you are also the Coordinator on
 another machine), do not mix sessions: switch to the matching role skill
 in a separate workspace before performing that action.
 
+> **Disambiguation — "Genesis", "bootstrap", "init"**: when the operator
+> says "genesis flow", "bootstrap", or "initialization", do NOT assume they
+> mean the Coordinator's `ceremony genesis-boot`. For a Manifest member the
+> most likely intent is the **member onboarding sequence**: workspace init
+> (`keyops init`), key generation (`key file-generate` / `key
+> yubikey-provision`), and waiting for the review bundle. Check the Action
+> whitelist below — if the requested action is listed there, proceed; only
+> refuse if the action is explicitly NOT listed.
+
 ## Action whitelist
 
 Manifest Set agents invoke `keyops` subcommands (preferred — zero runtime

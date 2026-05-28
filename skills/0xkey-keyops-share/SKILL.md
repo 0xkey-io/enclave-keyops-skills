@@ -57,6 +57,16 @@ another machine), do not mix sessions: switch to the matching role skill
 in a separate workspace, with a separate external vault path, before
 performing that action.
 
+> **Disambiguation — "Genesis", "bootstrap", "init"**: when the operator
+> says "genesis flow", "bootstrap", or "initialization", do NOT assume they
+> mean the Coordinator's `ceremony genesis-boot`. For a Share member the
+> most likely intent is the **member onboarding sequence**: workspace init
+> (`keyops init`), key generation (`key file-generate` / `key
+> yubikey-provision`), and — on the first ceremony — `ceremony
+> share-extract` (which IS in this role's action whitelist). Check the
+> Action whitelist below — if the requested action is listed there,
+> proceed; only refuse if the action is explicitly NOT listed.
+
 ## Action whitelist
 
 Share Set agents invoke `keyops` subcommands (preferred — zero runtime
