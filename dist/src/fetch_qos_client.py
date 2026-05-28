@@ -475,4 +475,16 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 
 if __name__ == "__main__":
+    import os
+
+    if not getattr(sys, "frozen", False) and "KEYOPS_SOURCE_MODE" not in os.environ:
+        print(
+            "ERROR: Direct Python invocation is disabled.\n"
+            "Use the self-contained 'keyops' binary instead.\n"
+            "  Download: https://github.com/0xkey-io/enclave-keyops-skills/releases/latest\n"
+            "\n"
+            "Maintainers: export KEYOPS_SOURCE_MODE=1 to bypass this check.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     raise SystemExit(main())

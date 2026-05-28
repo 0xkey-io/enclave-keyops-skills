@@ -30,7 +30,9 @@ def skill_dir() -> Path:
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         return Path(meipass)
-    return Path(__file__).resolve().parents[1]
+    # Source layout: dist/src/role_init.py → parents[2] = repo root
+    # config.prod.example.json lives in core/ (the single editable source).
+    return Path(__file__).resolve().parents[2] / "core"
 
 
 def expand_abs(path: str) -> Path:
@@ -877,4 +879,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    import os
+
+    if not getattr(sys, "frozen", False) and "KEYOPS_SOURCE_MODE" not in os.environ:
+        print(
+            "ERROR: Direct Python invocation is disabled.\n"
+            "Use the self-contained 'keyops' binary instead.\n"
+            "  Download: https://github.com/0xkey-io/enclave-keyops-skills/releases/latest\n"
+            "\n"
+            "Maintainers: export KEYOPS_SOURCE_MODE=1 to bypass this check.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     main()

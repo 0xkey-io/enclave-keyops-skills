@@ -19,7 +19,7 @@ Output (before platform-renaming by build.sh):
 from pathlib import Path
 
 REPO_ROOT = Path(SPECPATH).parent  # noqa: F821  (SPECPATH is injected by PyInstaller)
-SCRIPTS = REPO_ROOT / "core" / "scripts"
+SCRIPTS = REPO_ROOT / "dist" / "src"
 
 a = Analysis(  # noqa: F821  (Analysis is injected by PyInstaller)
     [str(SCRIPTS / "keyops_main.py")],
