@@ -6,11 +6,9 @@ When packaged as a self-contained binary (PyInstaller), this script is the
 single entry point that contains the full Python interpreter — callers need
 no Python runtime on their machine.
 
-When running from source, each sub-script can still be invoked directly:
-    python3 scripts/enclave_keyops.py  <args…>
-    python3 scripts/role_init.py       <args…>
-    python3 scripts/fetch_qos_client.py <args…>
-    python3 scripts/fetch_keyops.py    <args…>
+Direct Python invocation of this file (or any sibling script) is disabled
+for operator environments. Set KEYOPS_SOURCE_MODE=1 to enable source-mode
+for maintainer / CI use. See core/references/source-invocation.md.
 
 Command routing:
     keyops --version                   → prints version and exits
@@ -43,10 +41,8 @@ def _read_version() -> str:
         if candidate.is_file():
             return candidate.read_text(encoding="utf-8").strip()
     # Walk up from the script's directory to find VERSION. This handles:
-    #   core/scripts/ layout    → parents[2] = repo root
-    #   skills/xxx/scripts/     → parents[1] = skill root (synced by sync-skills.py)
-    # We check parents[1] first so that a standalone-installed skill finds its
-    # own VERSION before potentially walking into an unrelated parent directory.
+    #   dist/src/ layout        → parents[2] = repo root
+    # We check up to depth 3 to handle edge cases.
     script = Path(__file__).resolve()
     for depth in range(1, 4):
         candidate = script.parents[depth] / "VERSION"
@@ -102,4 +98,16 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    import os
+
+    if not getattr(sys, "frozen", False) and "KEYOPS_SOURCE_MODE" not in os.environ:
+        print(
+            "ERROR: Direct Python invocation is disabled.\n"
+            "Use the self-contained 'keyops' binary instead.\n"
+            "  Download: https://github.com/0xkey-io/enclave-keyops-skills/releases/latest\n"
+            "\n"
+            "Maintainers: export KEYOPS_SOURCE_MODE=1 to bypass this check.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     raise SystemExit(main())

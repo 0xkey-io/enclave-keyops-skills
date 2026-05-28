@@ -26,18 +26,12 @@ core/                            Single editable source. Edit files here.
   PRINCIPLES.md
   WORKFLOWS.md                   Full ceremony narrative (Coordinator only)
   config.prod.example.json
-  scripts/
-    keyops_main.py               Unified entry point for the keyops binary
-    enclave_keyops.py            stdlib CLI wrapping qos_client + kubectl
-    role_init.py                 stdlib role workspace initializer
-    fetch_qos_client.py          Fetches qos_client binary from GitHub Releases
-    fetch_keyops.py              Fetches keyops binary from GitHub Releases
   references/
     operator-prompts.md          per-role start prompts
     provisioning-matrix.md       what each role must produce / consume
     qos-client-platform.md       operator-client matrix & SHA256 policy
     workspace-rules.md           shared workspace + security baseline
-    source-invocation.md         Python source-mode fallback (maintainers)
+    source-invocation.md         Python source-mode reference (maintainers only)
     roles/
       coordinator.md
       manifest-set-member.md
@@ -50,13 +44,19 @@ skills/                          Installable skill packages (fan-out of core/).
   0xkey-keyops-share/            Auto-gen contents + hand-written SKILL.md
   0xkey-keyops-builder/          Auto-gen contents + hand-written SKILL.md
 
+dist/
+  src/                           PyInstaller build source (NOT for direct use).
+    keyops_main.py               Unified entry point bundled into keyops binary
+    enclave_keyops.py            stdlib CLI wrapping qos_client + kubectl
+    role_init.py                 stdlib role workspace initializer
+    fetch_qos_client.py          Fetches qos_client binary from GitHub Releases
+    fetch_keyops.py              Fetches keyops binary from GitHub Releases
+  keyops.spec                    PyInstaller spec for the self-contained binary.
+  build.sh                       Local/CI build helper; called by release.yml.
+
 tools/
   sync-skills.py                 Regenerates `skills/<role>/` from `core/`.
                                  Run with `--check` in CI to detect drift.
-
-dist/
-  keyops.spec                    PyInstaller spec for the self-contained binary.
-  build.sh                       Local/CI build helper; called by release.yml.
 
 .github/workflows/
   release.yml                    tag push → dual-platform build → GitHub Release
@@ -93,22 +93,6 @@ install -m 0755 keyops.darwin-arm64 ./bin/keyops
 ./bin/keyops --version
 ./bin/keyops doctor coordinator
 ./bin/keyops init --role coordinator ...
-```
-
-### Auto-fetch via skill script
-
-If you already have Python available (or are running from source), the
-`fetch_keyops.py` helper handles platform detection, download, and SHA256
-verification automatically:
-
-```bash
-python3 scripts/fetch_keyops.py --out ./bin/keyops
-```
-
-Or through the unified entry point if you already have a `keyops` binary:
-
-```bash
-keyops fetch-keyops --out ./bin/keyops
 ```
 
 ---
@@ -228,8 +212,6 @@ references/operator-prompts.md
 references/workspace-rules.md
 references/qos-client-platform.md
 references/provisioning-matrix.md
-scripts/enclave_keyops.py
-scripts/role_init.py
 ```
 
 And prompt:
@@ -239,6 +221,10 @@ Treat this directory as the 0xkey-keyops-<role> runbook package.
 Start from SKILL.md and follow its action whitelist; do not execute another
 role's workflow.
 ```
+
+The `keyops` binary is the only execution interface for operators. See the
+[keyops binary section](#keyops-binary-zero-runtime-dependencies) for download
+instructions. Do not attempt to run Python files from this repository directly.
 
 ## Operator usage
 
@@ -315,4 +301,4 @@ python3 -m unittest discover -t . -s tests -v
    - Publishes both binaries plus `.sha256` sidecars and a combined
      `SHA256SUMS` to the GitHub Release.
 5. Operators upgrade with `npx skills update 0xkey-keyops-<role>` or by
-   re-running `fetch_keyops.py --out ./bin/keyops` to pull the new binary.
+   re-running the `curl` download from step above to pull the new binary.

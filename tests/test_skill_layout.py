@@ -9,7 +9,7 @@ files. The aim is to keep four invariants stable as the skill evolves:
 2.  Description trigger keyword overlap between role skills stays low
     (defense in depth against recall pollution; see `phase0-report.md`).
 3.  Each role skill's action whitelist references only `enclave_keyops.py`
-    subcommands that actually exist in `core/scripts/enclave_keyops.py`.
+    subcommands that actually exist in `dist/src/enclave_keyops.py`.
 4.  Markdown links inside each role skill's `SKILL.md` resolve to files that
     really exist next to that skill (or under `core/` for the cross-cut
     references that synthesize the skill body).
@@ -30,7 +30,7 @@ from ._helpers import REPO_ROOT
 
 CORE = REPO_ROOT / "core"
 SKILLS_DIR = REPO_ROOT / "skills"
-ENCLAVE_KEYOPS_PY = CORE / "scripts" / "enclave_keyops.py"
+ENCLAVE_KEYOPS_PY = REPO_ROOT / "dist" / "src" / "enclave_keyops.py"
 
 ROLE_SKILLS = (
     "0xkey-keyops-coordinator",

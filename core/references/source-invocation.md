@@ -8,26 +8,36 @@ This file documents the Python source-mode invocation patterns for the
 - running on a platform where the PyInstaller binary is not available
 - CI pipelines that test against the source tree
 
+Source scripts live in `dist/src/` (the PyInstaller build source).
+They are **not** distributed inside the operator-facing skill packages.
+
+To enable source-mode, set the environment variable:
+
+```bash
+export KEYOPS_SOURCE_MODE=1
+```
+
+Without this variable, direct `python3` invocations of any file in
+`dist/src/` are rejected with an error message pointing to the binary.
+
 ## Translation Table
 
 | Binary form | Source form |
 |-------------|------------|
-| `keyops --version` | `python3 scripts/keyops_main.py --version` |
-| `keyops init --role <role> ...` | `python3 scripts/role_init.py --role <role> ...` |
-| `keyops fetch-qos-client ...` | `python3 scripts/fetch_qos_client.py ...` |
-| `keyops fetch-keyops ...` | `python3 scripts/fetch_keyops.py ...` |
-| `keyops --config C --workdir W <subcommand> ...` | `python3 scripts/enclave_keyops.py --config C --workdir W <subcommand> ...` |
-
-The `$SKILL_DIR` placeholder in source-mode commands is the absolute path of
-the installed skill on the agent's local filesystem. The agent that loaded
-the skill already knows it; resolve the placeholder before invoking Python.
+| `keyops --version` | `KEYOPS_SOURCE_MODE=1 python3 dist/src/keyops_main.py --version` |
+| `keyops init --role <role> ...` | `KEYOPS_SOURCE_MODE=1 python3 dist/src/role_init.py --role <role> ...` |
+| `keyops fetch-qos-client ...` | `KEYOPS_SOURCE_MODE=1 python3 dist/src/fetch_qos_client.py ...` |
+| `keyops fetch-keyops ...` | `KEYOPS_SOURCE_MODE=1 python3 dist/src/fetch_keyops.py ...` |
+| `keyops --config C --workdir W <subcommand> ...` | `KEYOPS_SOURCE_MODE=1 python3 dist/src/enclave_keyops.py --config C --workdir W <subcommand> ...` |
 
 ## Source-mode init examples
+
+Replace `$REPO_ROOT` with the absolute path of this repository on disk.
 
 ### Coordinator
 
 ```bash
-python3 "$SKILL_DIR/scripts/role_init.py" \
+KEYOPS_SOURCE_MODE=1 python3 "$REPO_ROOT/dist/src/role_init.py" \
   --role coordinator \
   --root "$WORKDIR" \
   --account-id "$AWS_ACCOUNT_ID" \
@@ -40,7 +50,7 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
 ### Builder
 
 ```bash
-python3 "$SKILL_DIR/scripts/role_init.py" \
+KEYOPS_SOURCE_MODE=1 python3 "$REPO_ROOT/dist/src/role_init.py" \
   --role builder \
   --root "$WORKDIR"
 ```
@@ -48,7 +58,7 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
 ### Manifest Set member
 
 ```bash
-python3 "$SKILL_DIR/scripts/role_init.py" \
+KEYOPS_SOURCE_MODE=1 python3 "$REPO_ROOT/dist/src/role_init.py" \
   --role manifest-set-member \
   --root "$WORKDIR" \
   --alias "$ALIAS"
@@ -57,7 +67,7 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
 ### Share Set member
 
 ```bash
-python3 "$SKILL_DIR/scripts/role_init.py" \
+KEYOPS_SOURCE_MODE=1 python3 "$REPO_ROOT/dist/src/role_init.py" \
   --role share-set-member \
   --root "$WORKDIR" \
   --alias "$ALIAS" \
@@ -69,7 +79,7 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
 Replace `keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR"` with:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
+KEYOPS_SOURCE_MODE=1 python3 "$REPO_ROOT/dist/src/enclave_keyops.py" \
   --config "$WORKDIR/config.json" --workdir "$WORKDIR"
 ```
 

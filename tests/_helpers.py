@@ -1,15 +1,14 @@
 """Shared test helpers for loading the skill's scripts as plain modules.
 
-The repo ships two `core/scripts/*.py` files that are normally invoked as
-`python3 path/to/script.py`. Pytest/unittest cannot import them by name
-because there's no package wrapper, so we load them via importlib.util.
-This keeps the skill itself dependency-free (no pyproject.toml, no
-`pip install -e .`) while still letting us unit-test the internals.
+The repo ships PyInstaller build sources in `dist/src/*.py`. Pytest/unittest
+cannot import them by name because there's no package wrapper, so we load
+them via importlib.util. This keeps the skill itself dependency-free (no
+pyproject.toml, no `pip install -e .`) while still letting us unit-test the
+internals.
 
-`SCRIPTS` points at `core/scripts/` (the single editable source). The
-per-role `skills/<role>/scripts/` copies produced by `tools/sync-skills.py`
-are byte-identical to this source; tests verify that invariant separately
-in `tests/test_skill_layout.py` instead of importing the copies.
+`SCRIPTS` points at `dist/src/` (PyInstaller source directory). These files
+are NOT synced into operator-facing skill packages; they are build artefacts
+that produce the `keyops` binary.
 """
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ from types import ModuleType
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE = REPO_ROOT / "core"
-SCRIPTS = CORE / "scripts"
+SCRIPTS = REPO_ROOT / "dist" / "src"
 
 
 def _load(module_name: str, file_path: Path) -> ModuleType:
