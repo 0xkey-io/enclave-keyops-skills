@@ -55,9 +55,8 @@ action.
 
 ## Action whitelist
 
-Coordinator agents invoke `keyops` subcommands (preferred — zero runtime
-dependencies) or `scripts/enclave_keyops.py` (source fallback — requires
-Python 3.11+):
+Coordinator agents invoke `keyops` subcommands (the self-contained binary
+— no Python runtime required):
 
 - `doctor coordinator`
 - `manifest generate` / `manifest envelope`
@@ -70,8 +69,7 @@ Python 3.11+):
 - `bundle checksums` / `bundle verify` / `bundle extract`
 - `verify`
 
-Plus `keyops init --role coordinator ...` (or `scripts/role_init.py --role
-coordinator ...`) to bootstrap the workspace.
+Plus `keyops init --role coordinator ...` to bootstrap the workspace.
 
 Coordinator must NOT invoke `manifest approve` (Manifest Set responsibility) or
 `ceremony reencrypt` / `ceremony share-extract` (Share Set responsibility).
@@ -95,12 +93,13 @@ The preferred invocation is the self-contained `keyops` binary (no Python
 required). On first use, fetch it with:
 
 ```bash
-keyops fetch-keyops --out ./bin/keyops
-# or, from source:
-python3 scripts/fetch_keyops.py --out ./bin/keyops
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+shasum -a 256 -c keyops.*.sha256
+install -m 0755 keyops.* ./bin/keyops   # or any directory on $PATH
 ```
 
-`keyops init --role coordinator ...` (or `scripts/role_init.py`) auto-fetches
+`keyops init --role coordinator ...` auto-fetches
 the latest stable `qos_client` from `0xkey-io/qos` GitHub Releases on first
 init (verified SHA256, no operator hash entry needed). When ceremony lock
 requires a specific revision, pass `--qos-client-release-tag <tag>` and
@@ -123,7 +122,7 @@ This skill is version `0.4.0` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any
-ceremony commands — a BREAKING release may require a `role_init.py
+ceremony commands — a BREAKING release may require a `keyops init
 --force` migration. The Coordinator should also broadcast the new
 version (and any migration step) to the Manifest / Share / Builder
 members before they upgrade their own role workspaces.

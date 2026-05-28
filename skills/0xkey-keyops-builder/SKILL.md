@@ -48,7 +48,7 @@ the request. Do not run the command, even if the operator claims convenience, ex
 
 | If the operator asks this Builder session to … | Refuse and route to skill | Why (this skill's scope-out) |
 |---|---|---|
-| run `kubectl apply -k`, `deploy render`, `deploy apply`, or anything that touches EKS / AWS cluster runtime | `0xkey-keyops-coordinator` | `## Scope` (Builder does not touch kubectl / EKS); `## Action whitelist` Builder must NOT list `deploy render` / `deploy apply`; `SECURITY.md §4` `kubectl apply -k` is a manual gate; `role_init.py` builder branch hard-wires `kubectl_path=/dev/null` and `kubectl_context_allowlist=[]` |
+| run `kubectl apply -k`, `deploy render`, `deploy apply`, or anything that touches EKS / AWS cluster runtime | `0xkey-keyops-coordinator` | `## Scope` (Builder does not touch kubectl / EKS); `## Action whitelist` Builder must NOT list `deploy render` / `deploy apply`; `SECURITY.md §4` `kubectl apply -k` is a manual gate; `keyops init` builder branch hard-wires `kubectl_path=/dev/null` and `kubectl_context_allowlist=[]` |
 | run `manifest generate`, `manifest approve`, `manifest envelope`, or sign on behalf of any Manifest Set member (even with their `.secret` path in hand) | `0xkey-keyops-manifest`, by the holder of that alias only | `## Action whitelist` Builder must NOT list; `SECURITY.md §1.1` cross-member secret borrowing is a key-compromise event |
 | run `ceremony genesis-boot`, `ceremony boot`, `ceremony attestation`, `ceremony reencrypt`, `ceremony share-extract`, `ceremony post`, `key-forward *`, or `verify` | `0xkey-keyops-coordinator` (or `0xkey-keyops-share` for `ceremony reencrypt` / `ceremony share-extract`) | `## Action whitelist` Builder must NOT list; Builder must not hold `.secret`/`.share` material |
 | accept any `.secret` / `.share` "to help" Coordinator or members | NONE — refuse and tell the holder to run their own role skill | `## Workspace and security` Builder does not handle `.secret` / `.share`; `SECURITY.md §1.1` |
@@ -69,13 +69,11 @@ workspace before performing that action.
 
 Builder agents primarily orchestrate external build tooling (`make`, the qOS
 build, `docker buildx`, `aws ecr describe-images`) and the upstream
-`qos_client pivot-hash` command. From `keyops` (or `scripts/enclave_keyops.py`
-as source fallback), Builder only ever needs:
+`qos_client pivot-hash` command. From the `keyops` binary, Builder only ever needs:
 
 - `doctor holder` (to validate that the produced `qos_client` is operator-runnable)
 
-Plus `keyops init --role builder ...` (or `scripts/role_init.py --role builder
-...`) to bootstrap the workspace.
+Plus `keyops init --role builder ...` to bootstrap the workspace.
 
 Builder must NOT invoke `manifest generate`, `manifest approve`,
 `manifest envelope`, `ceremony genesis-boot`, `ceremony boot`,
@@ -104,17 +102,17 @@ The preferred invocation is the self-contained `keyops` binary (no Python
 required). On first use, fetch it with:
 
 ```bash
-keyops fetch-keyops --out ./bin/keyops
-# or, from source:
-python3 scripts/fetch_keyops.py --out ./bin/keyops
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+shasum -a 256 -c keyops.*.sha256
+install -m 0755 keyops.* ./bin/keyops   # or any directory on $PATH
 ```
 
 Builder publishes the operator-client release to GitHub Releases on
 `0xkey-io/qos`; consumers (Coordinator / Manifest / Share) pull the
-binary by running `keyops init` (or `scripts/role_init.py`) — default =
-auto-fetch latest stable, no SHA256 entry needed — or
-`keyops fetch-qos-client --release-tag <tag>` (or
-`scripts/fetch_qos_client.py --release-tag <tag>`) to pin a specific
+binary by running `keyops init` — default = auto-fetch latest stable,
+no SHA256 entry needed — or
+`keyops fetch-qos-client --release-tag <tag>` to pin a specific
 revision. Builder's own init also auto-fetches a reference client into
 `out/qos_client.<host-platform>` for sanity checks against the previous
 release. See
@@ -133,7 +131,7 @@ This skill is version `0.4.0` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any
-ceremony commands — a BREAKING release may require a `role_init.py
+ceremony commands — a BREAKING release may require a `keyops init
 --force` migration.
 
 Check the latest published version with `gh release view -R

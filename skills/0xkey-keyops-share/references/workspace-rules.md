@@ -14,7 +14,7 @@ reading only:
 - exact paths explicitly provided by the user in the prompt
 
 If the user has not provided a workspace, do not create one silently and do
-not run `role_init.py` yet. Recommend exactly one default path for the role,
+not run `keyops init` yet. Recommend exactly one default path for the role,
 then wait for the user to confirm or override it:
 
 - Coordinator: `~/.0xkey-ops/coordinator`
@@ -94,7 +94,7 @@ Coordinator assigns `alias` and, for Share Set members, `member_index` in
 PRINCIPLES section 11). Members confirm assignments but do not choose them.
 
 Do not write a user-claimed alias into `config.json`, `outbox/<alias>.pub`, or
-`role_init.py` arguments until it is backed by a Coordinator roster.
+`keyops init` arguments until it is backed by a Coordinator roster.
 
 Roster backing means one of:
 
@@ -106,7 +106,7 @@ Roster backing means one of:
 
 Until roster backing exists, add `waiting-for-roster` to state and:
 
-- do not run `role_init.py`; the script refuses member init without
+- do not run `keyops init`; the command refuses member init without
   roster-backed `--alias` and, for Share, `--member-index`;
 - do not generate `outbox/<user-alias>.pub`;
 - do not accept proposals to "just pick an alias"; collisions can overwrite

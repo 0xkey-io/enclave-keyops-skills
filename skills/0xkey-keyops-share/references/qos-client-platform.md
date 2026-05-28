@@ -37,7 +37,7 @@ A single ceremony **must not** swap `qos_client` mid-flight: `boot-genesis`
 
 The default Builder workflow publishes operator-client binaries as a
 GitHub Release on `https://github.com/0xkey-io/qos`, and the skill is
-wired so the operator does not have to think about that URL: `role_init.py`
+wired so the operator does not have to think about that URL: `keyops init`
 auto-fetches the latest stable release on first init, verifies SHA256
 against the published sidecar, and writes the verified hash into
 `config.json.qos_client_sha256_expected`.
@@ -48,7 +48,7 @@ against the published sidecar, and writes the verified hash into
 # Resolves "latest stable" via GitHub's /releases/latest API, downloads
 # qos_client.<host-platform>, verifies SHA256, installs at the role-correct
 # path, and records the release tag + verified hash in config.json.
-python3 "$SKILL_DIR/scripts/role_init.py" \
+keyops init \
   --role <role> \
   --root "$WORKDIR" \
   ...role-specific flags...
@@ -56,7 +56,7 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
 
 What "latest" means here: GitHub's `/releases/latest` endpoint returns the
 most recent **non-draft, non-prerelease** release. If `0xkey-io/qos` has
-not published a stable release yet (only RC tags exist), `role_init.py`
+not published a stable release yet (only RC tags exist), `keyops init`
 falls back to the most recent prerelease and emits a stderr WARN — that
 is the signal to ask Builder for a stable release before running a
 production ceremony.
@@ -67,7 +67,7 @@ When the ceremony rules require a specific qOS revision, the Coordinator
 chooses the tag and every member uses the same one:
 
 ```bash
-python3 "$SKILL_DIR/scripts/role_init.py" \
+keyops init \
   --role <role> --root "$WORKDIR" \
   --qos-client-release-tag 0xkey-qos_client-vX.Y.Z
 ```
@@ -75,7 +75,7 @@ python3 "$SKILL_DIR/scripts/role_init.py" \
 ### Standalone re-fetch (refresh, repair, audit)
 
 ```bash
-python3 "$SKILL_DIR/scripts/fetch_qos_client.py" \
+keyops fetch-qos-client \
   --release-tag latest \
   --out "$WORKDIR/shared/qos_client"
 ```
@@ -96,12 +96,12 @@ Every published release ships three independent integrity anchors:
    binary was produced by a specific workflow run on the `0xkey-io/qos`
    repository.
 
-`fetch_qos_client.py` auto-detects the platform via `uname`, downloads the
+`keyops fetch-qos-client` auto-detects the platform via `uname`, downloads the
 binary plus its `.sha256` sidecar, refuses to install on hash mismatch
 (quarantining the bad binary at `<out>.tainted`), and prints a manual
 fallback recipe (curl + `gh release download` + `shasum -a 256 -c`) when
 the network or release path is unreachable. `doctor` detects a missing
-binary or SHA mismatch and re-prints the exact `fetch_qos_client.py`
+binary or SHA mismatch and re-prints the exact `keyops fetch-qos-client`
 command — defaulting to `--release-tag latest` even on workspaces that
 have no recorded release metadata — but doctor never auto-runs the
 fetch (`SECURITY.md §3.1`).
@@ -109,7 +109,7 @@ fetch (`SECURITY.md §3.1`).
 ### Offline init
 
 On machines with no GitHub network access at init time, scaffold the
-workspace with `--no-qos-client-fetch` and run `fetch_qos_client.py`
+workspace with `--no-qos-client-fetch` and run `keyops fetch-qos-client`
 later from a host that does have access (or copy the verified binary +
-`.sha256` in by hand). `role_init.py --force` re-runs the fetch when
+`.sha256` in by hand). `keyops init --force` re-runs the fetch when
 the network is back and updates `config.json` with the verified hash.
