@@ -35,3 +35,12 @@ audit-*.log
 # NO-GO; they MUST stay out of git so the branch contains only real artifacts.
 /skills-draft/
 /phase0-report.md
+
+# PyInstaller build artifacts — never commit these; they are published via
+# GitHub Releases only and are fetched at runtime by fetch_keyops.py.
+dist/out/
+dist/build/
+*.spec.bak
+keyops
+keyops.darwin-arm64
+keyops.linux-amd64

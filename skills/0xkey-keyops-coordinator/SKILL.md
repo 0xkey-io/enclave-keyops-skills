@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-coordinator
-version: 0.3.0
+version: 0.4.0
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Deployment Coordinator role:
   generating canonical five-service manifests, running boot-genesis /
@@ -16,7 +16,7 @@ description: >-
   qos_client / qOS release / pivot artifacts (those are Builder deliverables).
 user-invocable: true
 disable-model-invocation: true
-metadata: { "openclaw": { "requires": { "bins": ["python3"] } } }
+metadata: { "openclaw": { "requires": { "bins": [] } } }
 ---
 
 # 0xkey KeyOps — Coordinator
@@ -55,7 +55,9 @@ action.
 
 ## Action whitelist
 
-Coordinator agents only invoke `scripts/enclave_keyops.py` subcommands in:
+Coordinator agents invoke `keyops` subcommands (preferred — zero runtime
+dependencies) or `scripts/enclave_keyops.py` (source fallback — requires
+Python 3.11+):
 
 - `doctor coordinator`
 - `manifest generate` / `manifest envelope`
@@ -68,7 +70,8 @@ Coordinator agents only invoke `scripts/enclave_keyops.py` subcommands in:
 - `bundle checksums` / `bundle verify` / `bundle extract`
 - `verify`
 
-Plus `scripts/role_init.py --role coordinator ...` to bootstrap the workspace.
+Plus `keyops init --role coordinator ...` (or `scripts/role_init.py --role
+coordinator ...`) to bootstrap the workspace.
 
 Coordinator must NOT invoke `manifest approve` (Manifest Set responsibility) or
 `ceremony reencrypt` / `ceremony share-extract` (Share Set responsibility).
@@ -86,13 +89,22 @@ Coordinator must NOT invoke `manifest approve` (Manifest Set responsibility) or
   `post-share`, unsafe skips) require typed confirmation phrases — see
   `SECURITY.md §4`.
 
-## qos_client platform
+## CLI and qos_client platform
 
-`scripts/role_init.py` auto-fetches the latest stable `qos_client` from
-`0xkey-io/qos` GitHub Releases on first init (verified SHA256, no
-operator hash entry needed). When ceremony lock requires a specific
-revision, pass `--qos-client-release-tag <tag>` and communicate the same
-tag to all members. See
+The preferred invocation is the self-contained `keyops` binary (no Python
+required). On first use, fetch it with:
+
+```bash
+keyops fetch-keyops --out ./bin/keyops
+# or, from source:
+python3 scripts/fetch_keyops.py --out ./bin/keyops
+```
+
+`keyops init --role coordinator ...` (or `scripts/role_init.py`) auto-fetches
+the latest stable `qos_client` from `0xkey-io/qos` GitHub Releases on first
+init (verified SHA256, no operator hash entry needed). When ceremony lock
+requires a specific revision, pass `--qos-client-release-tag <tag>` and
+communicate the same tag to all members. See
 [references/qos-client-platform.md](references/qos-client-platform.md)
 for the operator-client matrix, the in-ceremony version pin rule (one
 ceremony, one `qos_client` revision), and the prerelease fallback.
@@ -107,7 +119,7 @@ ceremony, one `qos_client` revision), and the prerelease fallback.
 
 ## Version & update
 
-This skill is version `0.3.0` (see the frontmatter at the top of this
+This skill is version `0.4.0` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any
