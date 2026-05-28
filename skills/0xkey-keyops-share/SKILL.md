@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-share
-version: 0.3.0
+version: 0.4.0
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Share Set member role:
   verifying a Coordinator-issued share-request bundle, running
@@ -16,7 +16,7 @@ description: >-
   role).
 user-invocable: true
 disable-model-invocation: true
-metadata: { "openclaw": { "requires": { "bins": ["python3"] } } }
+metadata: { "openclaw": { "requires": { "bins": [] } } }
 ---
 
 # 0xkey KeyOps — Share Set member
@@ -59,7 +59,9 @@ performing that action.
 
 ## Action whitelist
 
-Share Set agents only invoke `scripts/enclave_keyops.py` subcommands in:
+Share Set agents invoke `keyops` subcommands (preferred — zero runtime
+dependencies) or `scripts/enclave_keyops.py` (source fallback — requires
+Python 3.11+):
 
 - `doctor holder`
 - `key file-generate` / `key yubikey-provision` (only when the member has no
@@ -73,7 +75,8 @@ Share Set agents only invoke `scripts/enclave_keyops.py` subcommands in:
   `--secret-path`; `--share-path` always required and always external)
 - `bundle create --kind wrapped-shares`
 
-Plus `scripts/role_init.py --role share-set-member ...` to bootstrap the
+Plus `keyops init --role share-set-member ...` (or
+`scripts/role_init.py --role share-set-member ...`) to bootstrap the
 workspace.
 
 Share Set must NOT invoke `manifest generate`, `manifest approve`,
@@ -105,13 +108,23 @@ Share Set must NOT invoke `manifest generate`, `manifest approve`,
   `.share`, `.pub`, or share-request bundles. If an expected input is absent,
   stop and ask the user where to place it.
 
-## qos_client platform
+## CLI and qos_client platform
 
-`scripts/role_init.py` auto-fetches the latest stable `qos_client` from
-`0xkey-io/qos` GitHub Releases on first init and verifies the SHA256
-against the published sidecar — the operator does not have to type a
-hash. When the Coordinator pins a specific tag for this ceremony, pass
-`--qos-client-release-tag <tag>` to use that revision instead. See
+The preferred invocation is the self-contained `keyops` binary (no Python
+required). On first use, fetch it with:
+
+```bash
+keyops fetch-keyops --out ./bin/keyops
+# or, from source:
+python3 scripts/fetch_keyops.py --out ./bin/keyops
+```
+
+`keyops init --role share-set-member ...` (or `scripts/role_init.py`)
+auto-fetches the latest stable `qos_client` from `0xkey-io/qos` GitHub
+Releases on first init and verifies the SHA256 against the published
+sidecar — the operator does not have to type a hash. When the Coordinator
+pins a specific tag for this ceremony, pass `--qos-client-release-tag <tag>`
+to use that revision instead. See
 [references/qos-client-platform.md](references/qos-client-platform.md)
 for the operator-client matrix and the prerelease fallback. On macOS
 arm64 the auto-fetch picks `qos_client.darwin-arm64`; do not require the
@@ -119,7 +132,7 @@ member to execute a `linux/amd64` release binary directly.
 
 ## Version & update
 
-This skill is version `0.3.0` (see the frontmatter at the top of this
+This skill is version `0.4.0` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any

@@ -58,6 +58,13 @@ ROLES: dict[str, str] = {
     "0xkey-keyops-builder": "builder",
 }
 
+# Files copied from REPO_ROOT (not core/) into every role skill.
+# These are kept outside core/ intentionally (e.g. VERSION is the single
+# SemVer truth shared by the mono-repo root, not a core-layer detail).
+REPO_ROOT_FILES: list[tuple[str, str]] = [
+    ("VERSION", "VERSION"),
+]
+
 # Files copied into EVERY role skill (relative to CORE → role skill root).
 SHARED_FILES: list[tuple[str, str]] = [
     ("SECURITY.md", "SECURITY.md"),
@@ -66,6 +73,8 @@ SHARED_FILES: list[tuple[str, str]] = [
     ("scripts/enclave_keyops.py", "scripts/enclave_keyops.py"),
     ("scripts/role_init.py", "scripts/role_init.py"),
     ("scripts/fetch_qos_client.py", "scripts/fetch_qos_client.py"),
+    ("scripts/fetch_keyops.py", "scripts/fetch_keyops.py"),
+    ("scripts/keyops_main.py", "scripts/keyops_main.py"),
     ("references/operator-prompts.md", "references/operator-prompts.md"),
     ("references/provisioning-matrix.md", "references/provisioning-matrix.md"),
     ("references/qos-client-platform.md", "references/qos-client-platform.md"),
@@ -102,6 +111,8 @@ skill has drifted from `core/`.
 def _expected_files(skill_name: str) -> list[tuple[Path, Path]]:
     role = ROLES[skill_name]
     out: list[tuple[Path, Path]] = []
+    for src, dst in REPO_ROOT_FILES:
+        out.append((REPO_ROOT / src, SKILLS / skill_name / dst))
     for src, dst in SHARED_FILES:
         out.append((CORE / src, SKILLS / skill_name / dst))
     if role == "coordinator":
@@ -232,12 +243,17 @@ def _sync_one(skill_name: str, *, check: bool, version: str) -> list[str]:
 
     expected_pairs = _expected_files(skill_name)
 
+    def _src_label(p: Path) -> str:
+        try:
+            return f"core/{p.relative_to(CORE)}"
+        except ValueError:
+            return str(p.relative_to(REPO_ROOT))
+
     for src, dst in expected_pairs:
         if not src.exists():
-            drift.append(
-                f"{skill_name}: missing source core/{src.relative_to(CORE)}"
-            )
+            drift.append(f"{skill_name}: missing source {_src_label(src)}")
             continue
+        src_label = _src_label(src)
         if check:
             if not dst.exists():
                 drift.append(
@@ -247,7 +263,7 @@ def _sync_one(skill_name: str, *, check: bool, version: str) -> list[str]:
             if _sha256(src) != _sha256(dst):
                 drift.append(
                     f"{skill_name}: drift {dst.relative_to(REPO_ROOT)} "
-                    f"!= core/{src.relative_to(CORE)}"
+                    f"!= {src_label}"
                 )
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)

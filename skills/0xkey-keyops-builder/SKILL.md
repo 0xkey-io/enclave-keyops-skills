@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-builder
-version: 0.3.0
+version: 0.4.0
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Builder / release operator role:
   producing verifiable qos_client (release + operator-native), qOS release with
@@ -14,7 +14,7 @@ description: >-
   and does not touch kubectl / EKS (those belong to Coordinator).
 user-invocable: true
 disable-model-invocation: true
-metadata: { "openclaw": { "requires": { "bins": ["python3"] } } }
+metadata: { "openclaw": { "requires": { "bins": [] } } }
 ---
 
 # 0xkey KeyOps — Builder / Release
@@ -69,12 +69,13 @@ workspace before performing that action.
 
 Builder agents primarily orchestrate external build tooling (`make`, the qOS
 build, `docker buildx`, `aws ecr describe-images`) and the upstream
-`qos_client pivot-hash` command. From `scripts/enclave_keyops.py`, Builder
-only ever needs:
+`qos_client pivot-hash` command. From `keyops` (or `scripts/enclave_keyops.py`
+as source fallback), Builder only ever needs:
 
 - `doctor holder` (to validate that the produced `qos_client` is operator-runnable)
 
-Plus `scripts/role_init.py --role builder ...` to bootstrap the workspace.
+Plus `keyops init --role builder ...` (or `scripts/role_init.py --role builder
+...`) to bootstrap the workspace.
 
 Builder must NOT invoke `manifest generate`, `manifest approve`,
 `manifest envelope`, `ceremony genesis-boot`, `ceremony boot`,
@@ -97,16 +98,26 @@ or `bundle *` (those are Coordinator / member responsibilities).
   matching `.sha256`.
 - Never mix qOS revisions inside a single ceremony.
 
-## qos_client platform
+## CLI and qos_client platform
+
+The preferred invocation is the self-contained `keyops` binary (no Python
+required). On first use, fetch it with:
+
+```bash
+keyops fetch-keyops --out ./bin/keyops
+# or, from source:
+python3 scripts/fetch_keyops.py --out ./bin/keyops
+```
 
 Builder publishes the operator-client release to GitHub Releases on
 `0xkey-io/qos`; consumers (Coordinator / Manifest / Share) pull the
-binary by running `scripts/role_init.py` (default = auto-fetch latest
-stable, no SHA256 entry needed) or
-`scripts/fetch_qos_client.py --release-tag <tag>` to pin a specific
-revision. Builder's own `role_init.py` also auto-fetches a reference
-client into `out/qos_client.<host-platform>` for sanity checks against
-the previous release. See
+binary by running `keyops init` (or `scripts/role_init.py`) — default =
+auto-fetch latest stable, no SHA256 entry needed — or
+`keyops fetch-qos-client --release-tag <tag>` (or
+`scripts/fetch_qos_client.py --release-tag <tag>`) to pin a specific
+revision. Builder's own init also auto-fetches a reference client into
+`out/qos_client.<host-platform>` for sanity checks against the previous
+release. See
 [references/qos-client-platform.md](references/qos-client-platform.md)
 for the per-platform release matrix, the prerelease fallback, and the
 in-ceremony version pin rule.
@@ -118,7 +129,7 @@ Builder's required outputs and how they feed Coordinator / members:
 
 ## Version & update
 
-This skill is version `0.3.0` (see the frontmatter at the top of this
+This skill is version `0.4.0` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any

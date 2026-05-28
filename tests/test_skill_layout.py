@@ -213,6 +213,13 @@ _EXTERNAL_TOOLS = {
     "aws",
     "aws ecr",
     "aws ecr describe-images",
+    # keyops binary entry points — the unified CLI wrapper that delegates to
+    # enclave_keyops.py / role_init.py / fetch_*.py internally.
+    "keyops",
+    "keyops init",
+    "keyops fetch-qos-client",
+    "keyops fetch-keyops",
+    "fetch_keyops.py",
 }
 
 

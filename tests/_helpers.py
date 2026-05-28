@@ -51,3 +51,9 @@ def load_fetch_qos_client() -> ModuleType:
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
     return _load("fetch_qos_client", SCRIPTS / "fetch_qos_client.py")
+
+
+def load_fetch_keyops() -> ModuleType:
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    return _load("fetch_keyops", SCRIPTS / "fetch_keyops.py")

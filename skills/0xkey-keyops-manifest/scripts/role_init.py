@@ -24,6 +24,12 @@ ROLE_CHOICES = ("coordinator", "manifest-set-member", "share-set-member", "build
 DEFAULT_SERVICES = ("signer", "policy-engine", "notarizer", "tls-fetcher", "transaction-parser")
 
 def skill_dir() -> Path:
+    # When packaged as a PyInstaller --onefile binary, __file__ lives under
+    # sys._MEIPASS (the extraction temp dir).  Data files bundled via `datas`
+    # in keyops.spec land at the root of _MEIPASS, so we return that directly.
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass)
     return Path(__file__).resolve().parents[1]
 
 
