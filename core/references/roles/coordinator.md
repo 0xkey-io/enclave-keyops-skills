@@ -62,12 +62,18 @@ legacy material.
 
 ## Initialize Workspace
 
-> `$SKILL_DIR` below is the absolute path of this skill on the agent's local
-> filesystem. The agent that loaded this skill already knows it; resolve the
-> placeholder before invoking Python and do not hardcode `.cursor/skills/...`,
-> `.codex/skills/...`, etc.
+> All commands below use the self-contained `keyops` binary — no Python
+> required. If `keyops` is not yet on `$PATH`, fetch it from GitHub
+> Releases first:
+>
+> ```bash
+> curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+> curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+> shasum -a 256 -c keyops.*.sha256
+> install -m 0755 keyops.* ./bin/keyops    # or any directory on $PATH
+> ```
 
-By default `role_init.py` resolves and downloads the latest stable
+By default `keyops init` resolves and downloads the latest stable
 `qos_client` from `0xkey-io/qos` GitHub Releases (skipping prereleases),
 verifies the SHA256 against the published sidecar, and installs the
 binary at `$WORKDIR/shared/qos_client`. The Coordinator does not have to
@@ -75,8 +81,7 @@ remember a hash for first-init; the runtime SHA256 lands in
 `config.json.qos_client_sha256_expected` automatically.
 
 ```bash
-# Explicit form (works for any environment):
-python3 "$SKILL_DIR/scripts/role_init.py" \
+keyops init \
   --role coordinator \
   --root "$WORKDIR" \
   --account-id "$AWS_ACCOUNT_ID" \
@@ -94,13 +99,13 @@ Optional `qos_client` flags for non-default situations:
   the same tag to all members.
 - `--qos-client-release-repo <owner/name>` — point at a private mirror.
 - `--no-qos-client-fetch` — scaffold offline; the printed todo line
-  carries the exact `fetch_qos_client.py` command for follow-up.
+  carries the exact `keyops fetch-qos-client` command for follow-up.
 
 Notes:
 - The default assumption is **prod**.
 - If `$WORKDIR` is missing from the prompt, recommend
   `~/.0xkey-ops/coordinator` and ask the user to confirm or override it before
-  running `role_init.py`.
+  running `keyops init`.
 - `--account-id`, `--region`, `--cluster`, `--enclave-role-name`, and
   `--kustomize-overlay-path` are required for `--role coordinator`.
 - `--kustomize-overlay-path` MUST be an absolute path to the K8s overlay
@@ -180,7 +185,7 @@ when the deployment runbook requires one.)
 
 4. Broadcast the roster to all members (signed announcement, IM thread,
    email — anything tamper-evident). Each member confirms their assigned
-   `(alias, member_index)` and runs `role_init.py --alias <s>
+   `(alias, member_index)` and runs `keyops init --alias <s>
    --member-index <n>` with exactly those values.
 5. Members hand back `<alias>.pub` files. Coordinator drops them in
    `shared/manifest-set/`, `shared/share-set/`, `shared/patch-set/`
@@ -269,8 +274,8 @@ Before running commands, inspect only `$WORKDIR` and classify:
 
 | State | Directory evidence | Next action |
 |-------|--------------------|-------------|
-| `uninitialized` | missing `config.json` | run `role_init.py` with account/region/cluster |
-| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `role_init.py` (default = auto-fetch latest from `0xkey-io/qos`, the same channel Builder publishes to); on offline machines run `python3 $SKILL_DIR/scripts/fetch_qos_client.py --release-tag latest --out $WORKDIR/shared/qos_client`, then re-run `role_init.py --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
+| `uninitialized` | missing `config.json` | run `keyops init` with account/region/cluster |
+| `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `keyops init` (default = auto-fetch latest from `0xkey-io/qos`, the same channel Builder publishes to); on offline machines run `keyops fetch-qos-client --release-tag latest --out $WORKDIR/shared/qos_client`, then re-run `keyops init --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
 | `missing-roster` | no `shared/member-roster.json` or it doesn't list every set member | publish or update the roster (see `Alias / member-index assignment`); members must not submit `.pub` files until roster exists |
 | `collecting-genesis-materials` | roster published but missing current-round public-key sets, `quorum_threshold`, PCR3 preimage, or `shared/dr-key.pub` | ask for exact member `.pub` paths (filename = roster alias + `.pub`), the DR public key, or current-round inbox files |
 | `waiting-for-builder-artifacts` | public-key sets exist, missing qOS PCR, pivots, pivot hashes, or images.json | ask Builder for handoff artifacts |
@@ -307,8 +312,7 @@ human gate; do not ask the user to copy/paste them.
 Health check:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   doctor coordinator
 ```
 
@@ -329,12 +333,10 @@ prior ceremony. Otherwise:
 4. Run `boot-genesis`:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   ceremony genesis-boot --genesis-endpoint "$GENESIS_ENDPOINT"
 # OR (when running against a Genesis Deployment in the same EKS cluster):
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   ceremony genesis-boot --resolve-pod-ip --genesis-label app=qos-genesis
 ```
 
@@ -343,8 +345,7 @@ python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
 
 ```bash
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle create --kind genesis-output \
   --bundle-dir "bundles/genesis-output-${STAMP}" \
   --archive "bundles/genesis-output-${STAMP}.tgz"
@@ -361,8 +362,7 @@ is operator's choice (see SKILL.md `Exchange transport`).
 Generate canonical manifests:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   manifest generate
 ```
 
@@ -370,8 +370,7 @@ Create and distribute review bundle:
 
 ```bash
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle create --kind review \
   --bundle-dir "bundles/manifest-review-${STAMP}" \
   --archive "bundles/manifest-review-${STAMP}.tgz"
@@ -389,31 +388,26 @@ namespace + nonce.
 Create envelopes:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   manifest envelope
 ```
 
 Render/apply K8s:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" deploy render
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" deploy render
 
 # After user approval:
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" deploy apply
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" deploy apply
 ```
 
 Boot and attest:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   ceremony boot --resolve-pod-ip
 
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   ceremony attestation --resolve-pod-ip
 ```
 
@@ -421,8 +415,7 @@ Create and distribute share-request bundle:
 
 ```bash
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle create --kind share-request \
   --bundle-dir "bundles/share-request-${STAMP}" \
   --archive "bundles/share-request-${STAMP}.tgz"
@@ -436,8 +429,7 @@ wrapped shares into `wrapped-shares-coordinator/<service>/`.
 Post shares:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   ceremony post \
   --resolve-pod-ip \
   --approval-alias "$APPROVAL_ALIAS" \
@@ -450,8 +442,7 @@ active ceremony config says otherwise.
 Verify:
 
 ```bash
-python3 "$SKILL_DIR/scripts/enclave_keyops.py" \
-  --config "$WORKDIR/config.json" --workdir "$WORKDIR" verify
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" verify
 ```
 
 Verification must include:
