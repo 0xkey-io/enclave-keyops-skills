@@ -81,11 +81,18 @@ environments while changing registry, tag, and digest.
 
 ## Initialize Workspace
 
-> `$SKILL_DIR` below is the absolute path of this skill on the agent's local
-> filesystem. The agent that loaded this skill already knows it; resolve the
-> placeholder before invoking Python.
+> All commands below use the self-contained `keyops` binary — no Python
+> required. If `keyops` is not yet on `$PATH`, fetch it from GitHub
+> Releases first:
+>
+> ```bash
+> curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+> curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+> shasum -a 256 -c keyops.*.sha256
+> install -m 0755 keyops.* ./bin/keyops    # or any directory on $PATH
+> ```
 
-By default `role_init.py` resolves and downloads the latest stable
+By default `keyops init` resolves and downloads the latest stable
 `qos_client` from `0xkey-io/qos` GitHub Releases (the same channel
 Builder publishes to) into `$WORKDIR/out/qos_client.<host-platform>`,
 verifying it against the published SHA256 sidecar. This gives the
@@ -95,10 +102,10 @@ build is published.
 
 If `$WORKDIR` is missing from the prompt, recommend
 `~/.0xkey-ops/builder` and ask the user to confirm or override it before
-running `role_init.py`.
+running `keyops init`.
 
 ```bash
-python3 "$SKILL_DIR/scripts/role_init.py" \
+keyops init \
   --role builder \
   --root "$WORKDIR"
 ```
@@ -151,7 +158,7 @@ tree that exists but is empty is `prepare-needed` (build inputs missing) or
 
 | State | Directory evidence | Next action |
 |-------|--------------------|-------------|
-| `uninitialized` | missing `config.json` | run `role_init.py --role builder --root "$WORKDIR"` |
+| `uninitialized` | missing `config.json` | run `keyops init --role builder --root "$WORKDIR"` |
 | `prepare-needed` | `config.json` present, no source revision metadata or ECR target recorded under `metadata/` | ask for component revisions, registry, tag, and output root |
 | `build-needed` | source / ECR known, missing `out/qos_client`, `out/qos-release/nitro.pcrs`, any pivot binary, any pivot hash, or `out/images.json` | run the relevant build/push checklist |
 | `handoff-ready` | all required artifacts and `out/images.json` exist, `out/builder-handoff.{json,md}` not yet written | verify hashes and write `builder-handoff.{json,md}` |
@@ -326,7 +333,7 @@ re-publish a release.
 
 When channel #1 is used, the `builder-handoff.json` MUST include a
 `qos_client_release` object so Coordinator and members can wire the
-`fetch_qos_client.py` helper without guessing paths:
+`keyops fetch-qos-client` helper without guessing paths:
 
 ```jsonc
 {

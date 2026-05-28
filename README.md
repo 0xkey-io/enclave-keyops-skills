@@ -37,6 +37,7 @@ core/                            Single editable source. Edit files here.
     provisioning-matrix.md       what each role must produce / consume
     qos-client-platform.md       operator-client matrix & SHA256 policy
     workspace-rules.md           shared workspace + security baseline
+    source-invocation.md         Python source-mode fallback (maintainers)
     roles/
       coordinator.md
       manifest-set-member.md

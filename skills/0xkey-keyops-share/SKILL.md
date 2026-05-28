@@ -57,11 +57,20 @@ another machine), do not mix sessions: switch to the matching role skill
 in a separate workspace, with a separate external vault path, before
 performing that action.
 
+> **Disambiguation — "Genesis", "bootstrap", "init"**: when the operator
+> says "genesis flow", "bootstrap", or "initialization", do NOT assume they
+> mean the Coordinator's `ceremony genesis-boot`. For a Share member the
+> most likely intent is the **member onboarding sequence**: workspace init
+> (`keyops init`), key generation (`key file-generate` / `key
+> yubikey-provision`), and — on the first ceremony — `ceremony
+> share-extract` (which IS in this role's action whitelist). Check the
+> Action whitelist below — if the requested action is listed there,
+> proceed; only refuse if the action is explicitly NOT listed.
+
 ## Action whitelist
 
-Share Set agents invoke `keyops` subcommands (preferred — zero runtime
-dependencies) or `scripts/enclave_keyops.py` (source fallback — requires
-Python 3.11+):
+Share Set agents invoke `keyops` subcommands (the self-contained binary
+— no Python runtime required):
 
 - `doctor holder`
 - `key file-generate` / `key yubikey-provision` (only when the member has no
@@ -75,9 +84,7 @@ Python 3.11+):
   `--secret-path`; `--share-path` always required and always external)
 - `bundle create --kind wrapped-shares`
 
-Plus `keyops init --role share-set-member ...` (or
-`scripts/role_init.py --role share-set-member ...`) to bootstrap the
-workspace.
+Plus `keyops init --role share-set-member ...` to bootstrap the workspace.
 
 Share Set must NOT invoke `manifest generate`, `manifest approve`,
 `manifest envelope`, `ceremony genesis-boot`, `ceremony boot`,
@@ -114,13 +121,13 @@ The preferred invocation is the self-contained `keyops` binary (no Python
 required). On first use, fetch it with:
 
 ```bash
-keyops fetch-keyops --out ./bin/keyops
-# or, from source:
-python3 scripts/fetch_keyops.py --out ./bin/keyops
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+shasum -a 256 -c keyops.*.sha256
+install -m 0755 keyops.* ./bin/keyops   # or any directory on $PATH
 ```
 
-`keyops init --role share-set-member ...` (or `scripts/role_init.py`)
-auto-fetches the latest stable `qos_client` from `0xkey-io/qos` GitHub
+`keyops init --role share-set-member ...` auto-fetches the latest stable `qos_client` from `0xkey-io/qos` GitHub
 Releases on first init and verifies the SHA256 against the published
 sidecar — the operator does not have to type a hash. When the Coordinator
 pins a specific tag for this ceremony, pass `--qos-client-release-tag <tag>`
@@ -136,7 +143,7 @@ This skill is version `0.4.0` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any
-ceremony commands — a BREAKING release may require a `role_init.py
+ceremony commands — a BREAKING release may require a `keyops init
 --force` migration.
 
 Check the latest published version with `gh release view -R
