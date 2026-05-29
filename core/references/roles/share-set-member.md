@@ -149,10 +149,10 @@ order:
 3. **missing**: each item names what is missing AND who to ask for it
    (Coordinator vs user vs external vault)
 4. **vault mode**: ask one line — "Is your long-term key on a YubiKey
-   (`--yubikey`) or in an encrypted-disk file (`--secret-path`)? Production
-   prefers YubiKey; see SECURITY.md section 5.1." Later `share-extract` /
-   `reencrypt` command shapes depend on this answer. `.share` is still an
-   external-vault file regardless of credential mode.
+   (`--yubikey`) or in an encrypted-disk file (`--secret-path`)?" Later
+   `share-extract` / `reencrypt` command shapes depend on this answer. Both
+   modes are supported for any ceremony. `.share` is still an external-vault
+   file regardless of credential mode.
 5. **next**: 1-line concrete next step
 
 For alias / member_index specifically:
@@ -176,12 +176,11 @@ For alias / member_index specifically:
 ## Vault mode: YubiKey vs file secret
 
 This skill supports two equivalent shapes for the long-term credential.
-**Default to the YubiKey path for prod**; only fall back to the file
-path only for explicit non-production rehearsal or when hardware is not
-available. Never silently switch modes between commands inside one
-session — pick one at first-turn and use it consistently.
+Ask the operator which form they are using at the start of the session, then
+use it consistently for all commands. Never silently switch modes between
+commands.
 
-| Topic                | YubiKey path (prod preferred)                                                                                       | File path (non-production / dev only)                                                                  |
+| Topic                | YubiKey path                                                                                                        | File path                                                                                              |
 |----------------------|---------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
 | Generation command   | `key yubikey-provision` (writes `outbox/<alias>.pub`; private key stays in PIV slot, never exported)                | `key file-generate --master-seed-path <ext>/<alias>.secret`                                    |
 | Where `.share` lives | **Always** an external vault file (`<ext>/<alias>.share`). YubiKey does NOT store the share; only the long-term key. | Same — `.share` is independent of `.secret` form.                                              |
@@ -274,12 +273,11 @@ Share members do not run `kubectl`, but the Coordinator may quote
 | `QuorumKeyProvisioned` | This service is fully provisioned; nothing further is required from this role |
 
 If the member does not already have a key, this skill supports generating
-one in either a YubiKey PIV slot (prod default) or a file outside
-`$WORKDIR` (non-production / dev only). Pick the form that matches what the user
-declared at first-turn under "Vault mode" — do not silently swap.
+one in either a YubiKey PIV slot or an encrypted-disk file outside `$WORKDIR`.
+Pick the form the user declared at the start of the session — do not silently swap.
 
-**YubiKey path (prod default).** Private key stays on the YubiKey and is
-not exportable; only the public key lands in this workdir.
+**YubiKey path.** Private key stays on the YubiKey and is not exportable;
+only the public key lands in this workdir.
 
 ```bash
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
@@ -288,7 +286,7 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   --pub-path "outbox/$ALIAS.pub"
 ```
 
-**File path (non-production / dev only).** Write the secret outside `$WORKDIR`
+**File path.** Write the secret outside `$WORKDIR`
 and only write the public key into this workdir:
 
 ```bash
@@ -323,9 +321,8 @@ GEN_ROOT=$(find "$WORKDIR/incoming/genesis-output" -name SHA256SUMS -maxdepth 3 
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle verify --bundle-dir "$GEN_ROOT"
 
-Use exactly one holder-credential flag — either `--yubikey` (prod) or
-`--secret-path <ext>/.secret` (non-production / dev). Passing both is a hard
-error.
+Use exactly one holder-credential flag — either `--yubikey` or
+`--secret-path <ext>/.secret`. Passing both is a hard error.
 
 YubiKey path:
 
@@ -340,7 +337,7 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
 chmod 600 "$KEY_DIR/$ALIAS.share"
 ```
 
-File path (non-production / dev only):
+File path:
 
 ```bash
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
@@ -394,9 +391,8 @@ Ask for explicit approval. Do not use `--unsafe-auto-confirm` unless the user
 explicitly says this is non-production/test and wants non-interactive re-encryption.
 
 Run re-encryption. **Use exactly one** holder-credential flag — either
-`--yubikey` (prod) or `--secret-path <ext>/.secret` (non-production / dev).
-`--share-path` is always required and always points to the external
-vault.
+`--yubikey` or `--secret-path <ext>/.secret`. `--share-path` is always
+required and always points to the external vault.
 
 YubiKey path:
 
@@ -409,7 +405,7 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   --share-path "$KEY_DIR/$ALIAS.share"
 ```
 
-File path (non-production / dev only):
+File path:
 
 ```bash
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
