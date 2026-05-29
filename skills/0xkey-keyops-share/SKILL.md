@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-share
-version: 0.5.0
+version: 0.5.1
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Share Set member role:
   verifying a Coordinator-issued share-request bundle, running
@@ -98,10 +98,10 @@ Share Set must NOT invoke `manifest generate`, `manifest approve`,
 - Member long-term key is held in **one** of two forms, picked at first-turn
   and used consistently in the whole session (see role doc "Vault mode" and
   `SECURITY.md §5.1`):
-  - YubiKey PIV slot (prod default) → all commands carry `--yubikey`;
+  - YubiKey PIV slot → all commands carry `--yubikey`;
     PIN/PUK is handled by qos_client on its own TTY and is **never**
     quoted in chat, audit log, or this skill's stdout.
-  - external `.secret` file (non-production / dev only) → all commands carry
+  - external `.secret` file → all commands carry
     `--secret-path <ext>/<alias>.secret`; the file MUST live outside the
     role workdir and never be read or printed by the agent.
 - `.share` is **always** an external vault file regardless of vault mode;
@@ -139,7 +139,7 @@ member to execute a `linux/amd64` release binary directly.
 
 ## Version & update
 
-This skill is version `0.5.0` (see the frontmatter at the top of this
+This skill is version `0.5.1` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any
