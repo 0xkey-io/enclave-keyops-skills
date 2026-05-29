@@ -3,7 +3,7 @@
 # Build the keyops self-contained binary for the current platform.
 #
 # Usage (from repo root):
-#   pip install pyinstaller
+#   pip install pyinstaller certifi
 #   bash dist/build.sh
 #
 # Outputs (in dist/out/):
