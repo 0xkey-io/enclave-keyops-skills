@@ -30,8 +30,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
+      - name: Install PyInstaller + certifi
+        run: pip install pyinstaller certifi
 
       - name: Build binary
         id: build

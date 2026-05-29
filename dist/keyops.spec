@@ -17,9 +17,15 @@ Output (before platform-renaming by build.sh):
     dist/keyops        (macOS/Linux single-file executable)
 """
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 
 REPO_ROOT = Path(SPECPATH).parent  # noqa: F821  (SPECPATH is injected by PyInstaller)
 SCRIPTS = REPO_ROOT / "dist" / "src"
+
+# Collect the certifi CA bundle so urllib.request can verify HTTPS in the
+# frozen binary.  Without this, any network call (qos_client fetch, GitHub
+# API) fails with CERTIFICATE_VERIFY_FAILED on macOS and some Linux distros.
+certifi_datas = collect_data_files("certifi")
 
 a = Analysis(  # noqa: F821  (Analysis is injected by PyInstaller)
     [str(SCRIPTS / "keyops_main.py")],
@@ -32,7 +38,7 @@ a = Analysis(  # noqa: F821  (Analysis is injected by PyInstaller)
         # skill source tree on disk. skill_dir() resolves to sys._MEIPASS when
         # frozen, so this file lands at the root of the extraction temp dir.
         (str(REPO_ROOT / "core" / "config.prod.example.json"), "."),
-    ],
+    ] + certifi_datas,
     # role_init.py uses a lazy `from fetch_qos_client import ...` inside a
     # conditional branch, which PyInstaller's static analyser cannot see.
     # Listing all four sibling modules here guarantees they are bundled.

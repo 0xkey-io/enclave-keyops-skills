@@ -20,8 +20,32 @@ Command routing:
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
+
+
+# ---------------------------------------------------------------------------
+# SSL CA bundle for PyInstaller frozen binary
+# ---------------------------------------------------------------------------
+
+def _setup_ssl() -> None:
+    """Point urllib/ssl at the bundled certifi CA bundle when frozen.
+
+    PyInstaller's --onefile binary extracts into a temp directory, cutting off
+    access to the system CA store. We bundle certifi's cacert.pem via the spec
+    file and set SSL_CERT_FILE so stdlib ssl/urllib use it transparently.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    if "SSL_CERT_FILE" in os.environ:
+        return
+    meipass = getattr(sys, "_MEIPASS", "")
+    cacert = Path(meipass) / "certifi" / "cacert.pem"
+    if cacert.is_file():
+        os.environ["SSL_CERT_FILE"] = str(cacert)
+
+_setup_ssl()
 
 
 # ---------------------------------------------------------------------------
