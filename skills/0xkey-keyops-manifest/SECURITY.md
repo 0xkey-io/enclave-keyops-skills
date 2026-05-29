@@ -167,18 +167,16 @@ phrases such as `approve-manifest`, `kubectl-apply`, `reencrypt-share`, or
 
 ### 5.1 Vault Modes
 
-Choose the long-term secret carrier by environment. Production defaults to
-YubiKey. File secrets are for non-production rehearsals or local development
-only.
+Choose the long-term secret carrier that matches the operator's hardware and
+security posture. Both modes are supported for any ceremony type; the operator
+decides which form to use.
 
-| Environment | Recommended vault | CLI shape | Backup policy | Downgrade policy |
-|---|---|---|---|---|
-| prod | YubiKey 5-class device / equivalent HSM (PIV slot, non-exportable) | `--yubikey` | Provision at least two YubiKeys; lost device uses `key-forward` | Do not downgrade; delay the ceremony if hardware is not ready |
-| non-prod rehearsal | encrypted disk image / encrypted USB `.secret` | `--secret-path /Volumes/<vault>/<alias>.secret` | one local encrypted backup plus one offline encrypted backup | short rehearsals only; never reuse for prod |
-| local dev | local encrypted directory `.secret` | `--secret-path ~/0xkey/operator-keys/<alias>/<alias>.secret` | one local backup is enough; destroy after rehearsal | regenerate before any real ceremony |
+| Vault mode | CLI shape | Key storage | Backup policy |
+|---|---|---|---|
+| YubiKey / HSM | `--yubikey` | Private key stays in PIV slot, non-exportable | Provision at least two YubiKeys; lost device uses `key-forward` |
+| Encrypted-disk file | `--secret-path <ext>/<alias>.secret` | `.secret` file on an external encrypted volume | One local encrypted copy plus one offline encrypted backup; loss requires `key-forward` |
 
-DR private keys follow the same production requirement: YubiKey or independent
-HSM in production, encrypted-disk only for non-production debug work.
+DR private keys follow the same two-mode policy above.
 
 ### 5.2 YubiKey Operational Rules
 
