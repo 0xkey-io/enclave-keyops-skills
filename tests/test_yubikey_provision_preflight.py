@@ -60,7 +60,7 @@ class YubiKeyProvisionPreflightTests(unittest.TestCase):
         self.assertIn("--algorithm TDES", err)
         self.assertIn("Management key algorithm: TDES", err)
 
-    def test_occupied_slots_require_exact_confirmation_before_running(self) -> None:
+    def test_occupied_slots_log_and_proceed(self) -> None:
         calls: list[list[str]] = []
 
         def fake_ykman(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -75,17 +75,14 @@ class YubiKeyProvisionPreflightTests(unittest.TestCase):
 
         with mock.patch.object(ek.shutil, "which", return_value="/usr/bin/ykman"):
             with mock.patch.object(ek, "_run_ykman_capture", side_effect=fake_ykman):
-                with mock.patch("builtins.input", return_value="overwrite-piv-slots") as input_mock:
-                    with mock.patch.object(ek, "run_process", return_value=0) as run_mock:
-                        with mock.patch.object(ek, "audit_file_hash"):
-                            ek.cmd_key_yubikey_provision(_ns(self.workdir), audit_log=None)
+                with mock.patch.object(ek, "run_process", return_value=0) as run_mock:
+                    with mock.patch.object(ek, "audit_file_hash"):
+                        ek.cmd_key_yubikey_provision(_ns(self.workdir), audit_log=None)
 
         self.assertIn(["piv", "keys", "info", "9c"], calls)
-        input_mock.assert_called_once()
-        self.assertIn("overwrite-piv-slots", input_mock.call_args.args[0])
         run_mock.assert_called_once()
 
-    def test_both_slots_occupied_shows_both_in_prompt(self) -> None:
+    def test_both_slots_occupied_logs_both(self) -> None:
         def fake_ykman(args: list[str]) -> subprocess.CompletedProcess[str]:
             if args == ["piv", "info"]:
                 return _cp("Management key algorithm: TDES\n")
@@ -97,30 +94,9 @@ class YubiKeyProvisionPreflightTests(unittest.TestCase):
 
         with mock.patch.object(ek.shutil, "which", return_value="/usr/bin/ykman"):
             with mock.patch.object(ek, "_run_ykman_capture", side_effect=fake_ykman):
-                with mock.patch("builtins.input", return_value="overwrite-piv-slots") as input_mock:
-                    with mock.patch.object(ek, "run_process", return_value=0):
-                        with mock.patch.object(ek, "audit_file_hash"):
-                            ek.cmd_key_yubikey_provision(_ns(self.workdir), audit_log=None)
-
-        prompt_text = input_mock.call_args.args[0]
-        self.assertIn("9C", prompt_text)
-        self.assertIn("9D", prompt_text)
-
-    def test_wrong_confirmation_phrase_aborts(self) -> None:
-        def fake_ykman(args: list[str]) -> subprocess.CompletedProcess[str]:
-            if args == ["piv", "info"]:
-                return _cp("Management key algorithm: TDES\n")
-            if args in (["piv", "keys", "info", "9c"], ["piv", "keys", "info", "9d"]):
-                return _cp("Algorithm: ECCP256\nOrigin: GENERATED\n")
-            self.fail(f"unexpected ykman call: {args}")
-
-        with mock.patch.object(ek.shutil, "which", return_value="/usr/bin/ykman"):
-            with mock.patch.object(ek, "_run_ykman_capture", side_effect=fake_ykman):
-                with mock.patch("builtins.input", return_value="yes"):
-                    with self.assertRaises(SystemExit) as cm:
-                        ek.preflight_yubikey_provision(_ns(self.workdir))
-
-        self.assertEqual(cm.exception.code, 1)
+                with mock.patch.object(ek, "run_process", return_value=0):
+                    with mock.patch.object(ek, "audit_file_hash"):
+                        ek.cmd_key_yubikey_provision(_ns(self.workdir), audit_log=None)
 
     def test_touch_notice_prints_for_clear_slots(self) -> None:
         def fake_ykman(args: list[str]) -> subprocess.CompletedProcess[str]:

@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-share
-version: 0.5.2
+version: 0.5.3
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Share Set member role:
   verifying a Coordinator-issued share-request bundle, running
@@ -109,7 +109,8 @@ Share Set must NOT invoke `manifest generate`, `manifest approve`,
   writes it, `reencrypt` reads it, and both refuse to put it inside the
   role workdir.
 - `proxy-re-encrypt-share` is a dangerous step requiring a typed confirmation
-  phrase (see `SECURITY.md §4`); `--yes` does not bypass it.
+  phrase (see `SECURITY.md §4`); always show the operator what will run and
+  obtain explicit approval in the chat UI before executing.
 - Do not search `$HOME`, Coordinator workspaces, legacy key archives,
   old ceremony directories, or other member directories for `.secret`,
   `.share`, `.pub`, or share-request bundles. If an expected input is absent,
@@ -139,7 +140,7 @@ member to execute a `linux/amd64` release binary directly.
 
 ## Version & update
 
-This skill is version `0.5.2` (see the frontmatter at the top of this
+This skill is version `0.5.3` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any

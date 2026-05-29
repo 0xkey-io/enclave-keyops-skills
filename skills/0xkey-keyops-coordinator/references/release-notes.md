@@ -32,6 +32,24 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.5.3 — 2026-05-30
+
+### Fixed
+
+- `ceremony share-extract` now passes `--qos-release-dir` to `qos_client
+  after-genesis`. Previously the wrapper omitted this flag, forcing operators
+  to call `qos_client` directly as a workaround.
+
+### Changed
+
+- `confirm_dangerous()` no longer blocks on `input()`. Dangerous operations
+  are logged to stderr and proceed immediately. Safety is enforced by
+  argument-level validation and agent pre-approval in the chat UI.
+- `--yes` help text reverted to its original scope (non-dangerous prompts
+  only).
+
+---
+
 ## 0.5.2 — 2026-05-29
 
 ### Fixed
