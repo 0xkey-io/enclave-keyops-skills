@@ -32,6 +32,79 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.5.0 — 2026-05-29
+
+### Headline
+
+Defense-in-depth against agent Python script misuse; vault mode is now a free
+operator choice (no longer environment-restricted).
+
+### Added
+
+- `AGENTS.md` at repo root — recognized by Cursor, Codex, Claude Code, Gemini,
+  and OpenClaw. Instructs agents to install role skills via `npx skills add` and
+  use the `keyops` binary exclusively; explicitly prohibits direct execution of
+  Python files.
+- Runtime guard in every Python entry point (`dist/src/*.py`): direct invocation
+  now exits 1 with a binary-download hint unless `sys.frozen` (PyInstaller) or
+  `KEYOPS_SOURCE_MODE=1` (maintainer escape hatch) is set.
+
+### Changed
+
+- **`core/scripts/` renamed to `dist/src/`** — build source is now co-located
+  with `keyops.spec` and `build.sh` to communicate "build artefact, not operator
+  interface". Updated `dist/keyops.spec`, `tests/_helpers.py`,
+  `tests/test_skill_layout.py`, and `role_init.skill_dir()` accordingly.
+- **Vault mode restriction removed** — `SECURITY.md §5.1` no longer mandates
+  YubiKey for production ceremonies. Both `--yubikey` and `--secret-path` are
+  supported for any ceremony type; the operator chooses based on their hardware
+  and security posture. Agents no longer block `--secret-path` when the ceremony
+  name contains `prod`.
+- Role skill packages no longer contain Python scripts (`scripts/` directories
+  removed); operators interact exclusively through the `keyops` binary.
+- `README.md`: removed `python3 scripts/fetch_keyops.py` auto-fetch section and
+  Python files from the "Agents without first-class skill support" file list.
+- `core/references/source-invocation.md`: updated paths to `dist/src/` and added
+  `KEYOPS_SOURCE_MODE=1` prefix to all maintainer examples.
+
+### Migration
+
+No ceremony data migration required. If you have a local clone of the skill used
+as a symlink target (`ln -sfn`), run `git pull` and `npx skills update
+0xkey-keyops-<role>` (or restart the agent). The binary interface is unchanged.
+
+---
+
+## 0.4.0 — 2026-05-28
+
+### Headline
+
+Self-contained `keyops` binary introduced; role skill packages are now
+binary-first with all Python scripts removed from operator-facing packages.
+
+### Added
+
+- PyInstaller build (`dist/keyops.spec`, `dist/build.sh`) producing
+  self-contained `keyops` binaries for `darwin-arm64` and `linux-amd64`.
+- GitHub Actions `release.yml`: tag push (`v*`) triggers dual-platform build and
+  publishes binaries + `.sha256` sidecars to GitHub Releases.
+- `keyops init`, `keyops fetch-qos-client`, `keyops fetch-keyops` unified CLI.
+
+### Changed
+
+- All operator-facing role documentation updated to use `keyops` binary commands
+  exclusively.
+- Python scripts removed from `skills/*/scripts/` directories.
+- `SKILL.md` files updated to reference `keyops` binary download instructions
+  instead of Python fallback.
+
+### Migration
+
+Download the `keyops` binary for your platform from GitHub Releases and place it
+on `$PATH` before running any ceremony command.
+
+---
+
 ## 0.3.0 — 2026-05-19
 
 ### Headline
