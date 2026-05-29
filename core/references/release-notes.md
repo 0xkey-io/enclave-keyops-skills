@@ -32,6 +32,18 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.5.2 — 2026-05-29
+
+### Fixed
+
+- Bundled `certifi` CA certificates into the PyInstaller binary. Without this,
+  all HTTPS requests (e.g., auto-fetching `qos_client` from GitHub during
+  `keyops init`) failed with `CERTIFICATE_VERIFY_FAILED` on macOS and some
+  Linux setups. The frozen binary now sets `SSL_CERT_FILE` at startup to point
+  at the bundled `cacert.pem`.
+
+---
+
 ## 0.5.1 — 2026-05-29
 
 ### Fixed
