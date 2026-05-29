@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-coordinator
-version: 0.5.2
+version: 0.5.3
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Deployment Coordinator role:
   generating canonical five-service manifests, running boot-genesis /
@@ -118,7 +118,7 @@ ceremony, one `qos_client` revision), and the prerelease fallback.
 
 ## Version & update
 
-This skill is version `0.5.2` (see the frontmatter at the top of this
+This skill is version `0.5.3` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any

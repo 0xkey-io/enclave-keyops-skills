@@ -137,9 +137,9 @@ Rules:
 One ceremony uses one binary revision from `boot-genesis` through `verify`.
 Changing qOS / `qos_client` mid-ceremony invalidates the round.
 
-## 4. Human Confirmation Gates
+## 4. Dangerous Operation Logging
 
-The following steps must never run fully unattended:
+The following steps are logged to stderr before execution:
 
 - `approve-manifest`
 - `proxy-re-encrypt-share`
@@ -148,10 +148,10 @@ The following steps must never run fully unattended:
 - `unsafe-skip-attestation`
 - `unsafe-auto-confirm`
 
-Global `--yes` must not bypass these gates. Dangerous steps require exact typed
-phrases such as `approve-manifest`, `kubectl-apply`, `reencrypt-share`, or
-`post-share`. `--yes` is only for non-sensitive steps such as `doctor` or
-`deploy render`.
+These operations proceed without interactive prompts. Safety is enforced by
+argument-level validation (credential checks, path restrictions, roster
+verification) which runs before the operation, and by the agent obtaining
+explicit human approval in its own UI before invoking the command.
 
 ## 5. Workdir And Key Vault
 

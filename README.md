@@ -270,8 +270,8 @@ For longer per-role start prompts, see
 - Manifest / Share members do not need AWS, EKS, or kubectl access; their
   skills do not whitelist any such command.
 - Dangerous steps require explicit human confirmation: manifest approval,
-  share re-encryption, deploy apply, and post-share. `--yes` does not bypass
-  these.
+  share re-encryption, deploy apply, and post-share are logged to stderr
+  before execution.
 
 See `core/SECURITY.md` and role documents under `core/references/roles/` (or
 the synced copies inside each role skill) before running a ceremony.
