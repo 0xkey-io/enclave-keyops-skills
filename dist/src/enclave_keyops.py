@@ -1982,12 +1982,22 @@ def install_bundle(bundle_root: Path, cfg: Config) -> None:
 
     paths = cfg.paths()
     installed: List[str] = []
+    # resolve_path() resolves symlinks (e.g. /tmp -> /private/tmp on macOS),
+    # so compare against the resolved workdir; otherwise relative_to() raises
+    # whenever the workdir lives under a symlinked path.
+    workdir_resolved = cfg.workdir.resolve()
+
+    def _display(dest: Path) -> str:
+        try:
+            return str(dest.relative_to(workdir_resolved))
+        except ValueError:
+            return str(dest)
 
     def _install_file(src: Path, dest: Path) -> None:
         if src.is_file():
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
-            installed.append(str(dest.relative_to(cfg.workdir)))
+            installed.append(_display(dest))
 
     def _install_tree(src: Path, dest: Path) -> None:
         if src.is_dir():
@@ -2049,20 +2059,25 @@ def install_bundle(bundle_root: Path, cfg: Config) -> None:
         )
         _install_roster()
     elif kind == "share-request":
-        incoming = resolve_path(cfg.workdir, "incoming")
+        # Targets must match where `ceremony reencrypt` reads from:
+        #   - envelopes & approvals: workdir_manifest_subdir (mroot)
+        #   - attestations: --attest-dir (default "attestations")
+        #   - manifest-set: paths.manifest_set_dir
+        mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
+        att_dest = resolve_path(cfg.workdir, "attestations")
         services = meta.get("services", [])
         for svc_name in services:
             _install_file(
                 bundle_root / f"{svc_name}-manifest-envelope.json",
-                incoming / f"{svc_name}-manifest-envelope.json",
+                mroot / f"{svc_name}-manifest-envelope.json",
             )
             _install_file(
                 bundle_root / "attestations" / f"{svc_name}.cose",
-                incoming / "attestations" / f"{svc_name}.cose",
+                att_dest / f"{svc_name}.cose",
             )
             _install_tree(
                 bundle_root / "approvals" / svc_name,
-                incoming / "approvals" / svc_name,
+                mroot / "approvals" / svc_name,
             )
         _install_tree(
             bundle_root / "manifest-set",
@@ -2077,9 +2092,12 @@ def install_bundle(bundle_root: Path, cfg: Config) -> None:
         mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
         _install_tree(bundle_root / "approvals", mroot / "approvals")
     elif kind == "wrapped-shares":
+        # `ceremony post` reads from --wrapped-in-dir (default
+        # "wrapped-shares-coordinator"); the Coordinator merges each
+        # member's wrapped shares into wrapped-shares-coordinator/<service>/.
         _install_tree(
             bundle_root / "wrapped-shares",
-            resolve_path(cfg.workdir, "wrapped-shares-in"),
+            resolve_path(cfg.workdir, "wrapped-shares-coordinator"),
         )
     else:
         sys.stderr.write(
