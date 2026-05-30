@@ -256,9 +256,9 @@ Before running commands, inspect only `$WORKDIR` and classify the state.
 | `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `keyops init` (default = auto-fetch latest from `0xkey-io/qos`); on offline machines run `keyops fetch-qos-client --release-tag latest --out $WORKDIR/shared/qos_client` and then re-run `keyops init --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
 | `key-init-needed` | missing `outbox/<alias>.pub`; for file mode also missing external `.secret` path | YubiKey path: confirm slot is provisioned and run `key yubikey-provision`. File path: propose `$HOME/0xkey/operator-keys/<env>/<alias>/<alias>.secret` and run `key file-generate` after confirmation. (See "Vault mode" above.) |
 | `waiting-for-genesis-output-bundle` | has the chosen holder credential (YubiKey OR external `.secret`) AND `outbox/<alias>.pub`, missing `inbox/genesis-output-*.tgz` and missing external `.share` (cannot precede `key-init-needed` — `ceremony share-extract` needs `--yubikey` OR `--secret-path`) | ask Coordinator to send the Genesis-output bundle |
-| `ready-to-extract-share` | has `shared/qos_client`, the chosen holder credential, and `inbox/genesis-output-*.tgz` | run `bundle extract`, `bundle verify`, then `ceremony share-extract` (with `--yubikey` OR `--secret-path`) to write `.share` to the external key vault |
+| `ready-to-extract-share` | has `shared/qos_client`, the chosen holder credential, and `inbox/genesis-output-*.tgz` | run `bundle extract --install`, then `ceremony share-extract` (with `--yubikey` OR `--secret-path`) to write `.share` to the external key vault |
 | `waiting-for-share-request` | has holder credential AND external `.share`, missing `inbox/share-request-*.tgz` | ask user to place Coordinator share-request bundle in `inbox/` |
-| `ready-to-reencrypt` | has `shared/qos_client`, holder credential, external `.share`, and share-request bundle | run holder doctor, extract, verify, summarize |
+| `ready-to-reencrypt` | has `shared/qos_client`, holder credential, external `.share`, and share-request bundle | run holder doctor, `bundle extract --install`, summarize |
 | `wrapped-shares-ready` | wrapped-shares bundle exists under `outbox/` | tell user to send only `.tgz` + `.sha256` to Coordinator |
 | `blocked` | checksum mismatch, missing qos_client, bad bundle, or user has not approved | report blocker and stop |
 
@@ -315,11 +315,13 @@ ceremony. Otherwise:
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle extract \
   --archive inbox/genesis-output-*.tgz \
-  --bundle-dir incoming/genesis-output
+  --bundle-dir incoming/genesis-output \
+  --install
+```
 
-GEN_ROOT=$(find "$WORKDIR/incoming/genesis-output" -name SHA256SUMS -maxdepth 3 -type f -print -quit | xargs dirname)
-keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
-  bundle verify --bundle-dir "$GEN_ROOT"
+The `--install` flag automatically distributes the extracted files
+(genesis-output namespace, PCR files, qos-release) into the correct
+workdir paths so `ceremony share-extract` can find them.
 
 Use exactly one holder-credential flag — either `--yubikey` or
 `--secret-path <ext>/.secret`. Passing both is a hard error.
@@ -332,8 +334,7 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   --alias "$ALIAS" \
   --member-index "$MEMBER_INDEX" \
   --yubikey \
-  --share-path "$KEY_DIR/$ALIAS.share" \
-  --namespace-dir "$GEN_ROOT/genesis-output"
+  --share-path "$KEY_DIR/$ALIAS.share"
 chmod 600 "$KEY_DIR/$ALIAS.share"
 ```
 
@@ -345,8 +346,7 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   --alias "$ALIAS" \
   --member-index "$MEMBER_INDEX" \
   --secret-path "$KEY_DIR/$ALIAS.secret" \
-  --share-path "$KEY_DIR/$ALIAS.share" \
-  --namespace-dir "$GEN_ROOT/genesis-output"
+  --share-path "$KEY_DIR/$ALIAS.share"
 chmod 600 "$KEY_DIR/$ALIAS.share"
 ```
 
@@ -368,16 +368,13 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle extract \
   --archive inbox/share-request-*.tgz \
-  --bundle-dir incoming/share-request
+  --bundle-dir incoming/share-request \
+  --install
 ```
 
-Find and verify the extracted root:
-
-```bash
-REQUEST_ROOT=$(find "$WORKDIR/incoming/share-request" -name SHA256SUMS -maxdepth 3 -type f -print -quit | xargs dirname)
-keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
-  bundle verify --bundle-dir "$REQUEST_ROOT"
-```
+The `--install` flag distributes manifest envelopes, attestations,
+approvals, and manifest-set public keys into the workdir paths that
+`ceremony reencrypt` expects.
 
 Before re-encrypting, summarize for the user:
 
