@@ -287,7 +287,7 @@ class Config:
     ) -> None:
         self.raw = raw
         self.workdir = workdir
-        self.qos_client = Path(raw["qos_client_path"]).expanduser()
+        self.qos_client = resolve_path(workdir, Path(raw["qos_client_path"]).expanduser())
         if "super_repo_root" in raw:
             sys.stderr.write(
                 "config.super_repo_root is no longer supported; remove it from the "
