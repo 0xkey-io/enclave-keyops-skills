@@ -32,6 +32,35 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.5.4 — 2026-05-30
+
+### Added
+
+- `bundle extract --install`: after extracting and verifying a bundle,
+  automatically distribute files into the workdir paths that downstream
+  commands expect. Eliminates 10+ manual `cp` steps per bundle.
+- `bundle install --bundle-dir`: install from an already-extracted bundle
+  directory. Supports all bundle kinds: review, genesis-output,
+  share-request, approvals, wrapped-shares.
+- `bundle create --kind review` now includes `aws-x86_64.pcrs` alongside
+  `nitro.pcrs` from the qos-release directory.
+- `manifest approve` runs preflight checks on qos-release PCR files,
+  pcr3-preimage.txt, and quorum_key.pub before invoking qos_client,
+  giving clear errors instead of Rust panics.
+
+### Fixed
+
+- `Config.__init__` now resolves `qos_client_path` relative to `--workdir`
+  instead of the current working directory. Callers no longer need to `cd`
+  into the workdir before running commands like `doctor holder`.
+
+### Changed
+
+- Runbooks for manifest-set-member and share-set-member updated to use
+  the new `--install` flag, removing manual find/verify/cp steps.
+
+---
+
 ## 0.5.3 — 2026-05-30
 
 ### Fixed

@@ -230,7 +230,7 @@ Before running commands, inspect only `$WORKDIR` and classify the state.
 | `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `keyops init` (default = auto-fetch latest from `0xkey-io/qos`); on offline machines run `keyops fetch-qos-client --release-tag latest --out $WORKDIR/shared/qos_client` and then re-run `keyops init --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
 | `key-init-needed` | missing `outbox/<alias>.pub`; for file mode also missing external `.secret` path | YubiKey path: confirm slot is provisioned and run `key yubikey-provision`. File path: propose `$HOME/0xkey/operator-keys/<env>/<alias>/<alias>.secret` and run `key file-generate` after confirmation. (See "Vault mode" above.) |
 | `waiting-for-review` | has key material (YubiKey OR external secret) and `outbox/<alias>.pub`, missing `inbox/manifest-review-*.tgz` | ask user to place Coordinator review bundle in `inbox/` |
-| `ready-to-review` | has `shared/qos_client`, the chosen holder credential (YubiKey OR external secret), and review bundle | run holder doctor, extract, verify, summarize |
+| `ready-to-review` | has `shared/qos_client`, the chosen holder credential (YubiKey OR external secret), and review bundle | run holder doctor, `bundle extract --install`, summarize |
 | `approval-ready` | approvals bundle exists under `outbox/` | tell user to send only `.tgz` + `.sha256` to Coordinator |
 | `blocked` | checksum mismatch, missing qos_client, bad bundle, or user has not approved | report blocker and stop |
 
@@ -288,16 +288,13 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   bundle extract \
   --archive inbox/manifest-review-*.tgz \
-  --bundle-dir incoming/review
+  --bundle-dir incoming/review \
+  --install
 ```
 
-Find the extracted root:
-
-```bash
-REVIEW_ROOT=$(find "$WORKDIR/incoming/review" -name SHA256SUMS -maxdepth 3 -type f -print -quit | xargs dirname)
-keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
-  bundle verify --bundle-dir "$REVIEW_ROOT"
-```
+The `--install` flag automatically distributes the extracted files
+(manifest JSONs, public key sets, PCR files, pivot hashes, qos-release)
+into the correct workdir paths so `manifest approve` can find them.
 
 Before approving, summarize for the user:
 

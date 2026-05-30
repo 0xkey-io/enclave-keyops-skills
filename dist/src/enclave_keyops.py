@@ -287,7 +287,7 @@ class Config:
     ) -> None:
         self.raw = raw
         self.workdir = workdir
-        self.qos_client = Path(raw["qos_client_path"]).expanduser()
+        self.qos_client = resolve_path(workdir, Path(raw["qos_client_path"]).expanduser())
         if "super_repo_root" in raw:
             sys.stderr.write(
                 "config.super_repo_root is no longer supported; remove it from the "
@@ -594,6 +594,20 @@ def check_qos_client(cfg: Config) -> None:
             )
             raise SystemExit(1)
         print(f"qos_client sha256 OK: {h}")
+
+
+def _check_pcrs(qos_release: Path) -> None:
+    """Preflight: warn early if expected PCR files are missing."""
+    expected = ("nitro.pcrs", "aws-x86_64.pcrs")
+    missing = [f for f in expected if not (qos_release / f).is_file()]
+    if missing:
+        sys.stderr.write(
+            f"qos-release directory {qos_release} is missing PCR files: "
+            f"{', '.join(missing)}\n"
+            "qos_client will panic at runtime without these files. Ensure the "
+            "Coordinator's review/genesis-output bundle includes them.\n"
+        )
+        raise SystemExit(2)
 
 
 def check_tools(tools: Sequence[str]) -> None:
@@ -991,9 +1005,18 @@ def cmd_manifest_approve(ns: argparse.Namespace, cfg: Config, audit_log: Optiona
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     ms, ss, ps = _manifest_dirs(cfg)
     qos_release = resolve_path(cfg.workdir, cfg.paths()["qos_release_dir"])
+    if not qos_release.is_dir():
+        sys.stderr.write(
+            f"qos-release directory not found: {qos_release}\n"
+            "The review bundle must include qos-release/ with PCR files.\n"
+        )
+        raise SystemExit(2)
+    _check_pcrs(qos_release)
     pcr = resolve_path(cfg.workdir, cfg.paths()["pcr3_preimage_path"])
+    require_file(pcr, "pcr3 preimage")
     hashes = resolve_path(cfg.workdir, cfg.paths()["pivot_hashes_dir"])
     qkp = resolve_path(cfg.workdir, cfg.paths()["quorum_key_pub_path"])
+    require_file(qkp, "quorum_key.pub")
     to_run = cfg.all_services() if not ns.service else [cfg.svc(ns.service)]
     defs = cfg.raw["defaults"]
 
@@ -1804,6 +1827,9 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
         nitro = qos_release / "nitro.pcrs"
         if nitro.is_file():
             copy_file(nitro, root / "qos-release" / "nitro.pcrs")
+        aws_pcrs = qos_release / "aws-x86_64.pcrs"
+        if aws_pcrs.is_file():
+            copy_file(aws_pcrs, root / "qos-release" / "aws-x86_64.pcrs")
     elif kind == "share-request":
         for svc in cfg.all_services():
             copy_file(mroot / f"{svc['name']}-manifest-envelope.json", root / f"{svc['name']}-manifest-envelope.json")
@@ -1924,26 +1950,194 @@ def cmd_bundle_create(ns: argparse.Namespace, cfg: Config, audit_log: Optional[P
         audit_file_hash(audit_log, archive)
 
 
+def _find_bundle_root(dest: Path) -> Path:
+    """Locate the extracted bundle root (the directory containing SHA256SUMS)."""
+    if (dest / "SHA256SUMS").is_file():
+        return dest
+    children = [p for p in dest.iterdir() if p.is_dir()]
+    if len(children) != 1:
+        sys.stderr.write(
+            f"cannot locate extracted bundle root under {dest}; expected one child directory\n"
+        )
+        raise SystemExit(2)
+    return children[0]
+
+
+def install_bundle(bundle_root: Path, cfg: Config) -> None:
+    """Distribute extracted bundle files into the workdir based on BUNDLE.json kind.
+
+    This is the inverse of create_bundle: it reads BUNDLE.json to determine
+    the bundle kind and copies each file to the location that downstream
+    commands (manifest approve, ceremony share-extract, etc.) expect.
+    """
+    meta_path = bundle_root / "BUNDLE.json"
+    if not meta_path.is_file():
+        sys.stderr.write(f"BUNDLE.json not found in {bundle_root}\n")
+        raise SystemExit(2)
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    kind = meta.get("kind")
+    if not kind:
+        sys.stderr.write("BUNDLE.json missing 'kind' field\n")
+        raise SystemExit(2)
+
+    paths = cfg.paths()
+    installed: List[str] = []
+    # resolve_path() resolves symlinks (e.g. /tmp -> /private/tmp on macOS),
+    # so compare against the resolved workdir; otherwise relative_to() raises
+    # whenever the workdir lives under a symlinked path.
+    workdir_resolved = cfg.workdir.resolve()
+
+    def _display(dest: Path) -> str:
+        try:
+            return str(dest.relative_to(workdir_resolved))
+        except ValueError:
+            return str(dest)
+
+    def _install_file(src: Path, dest: Path) -> None:
+        if src.is_file():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+            installed.append(_display(dest))
+
+    def _install_tree(src: Path, dest: Path) -> None:
+        if src.is_dir():
+            for p in sorted(src.rglob("*")):
+                if p.is_file():
+                    _install_file(p, dest / p.relative_to(src))
+
+    def _install_roster() -> None:
+        roster = bundle_root / "member-roster.json"
+        roster_dest = resolve_path(
+            cfg.workdir,
+            paths.get("member_roster_path", "shared/member-roster.json"),
+        )
+        _install_file(roster, roster_dest)
+
+    if kind == "review":
+        mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
+        services = meta.get("services", [])
+        for svc_name in services:
+            _install_file(
+                bundle_root / f"{svc_name}-manifest.json",
+                mroot / f"{svc_name}-manifest.json",
+            )
+        for key, dirname in (
+            ("manifest_set_dir", "manifest-set"),
+            ("share_set_dir", "share-set"),
+            ("patch_set_dir", "patch-set"),
+        ):
+            _install_tree(bundle_root / dirname, resolve_path(cfg.workdir, paths[key]))
+        _install_file(
+            bundle_root / "quorum_key.pub",
+            resolve_path(cfg.workdir, paths["quorum_key_pub_path"]),
+        )
+        _install_file(
+            bundle_root / "pcr3-preimage.txt",
+            resolve_path(cfg.workdir, paths["pcr3_preimage_path"]),
+        )
+        _install_tree(
+            bundle_root / "pivot-hashes",
+            resolve_path(cfg.workdir, paths["pivot_hashes_dir"]),
+        )
+        _install_tree(
+            bundle_root / "qos-release",
+            resolve_path(cfg.workdir, paths["qos_release_dir"]),
+        )
+        _install_roster()
+    elif kind == "genesis-output":
+        _install_tree(
+            bundle_root / "genesis-output",
+            resolve_path(cfg.workdir, "incoming/genesis-output"),
+        )
+        _install_file(
+            bundle_root / "pcr3-preimage.txt",
+            resolve_path(cfg.workdir, paths["pcr3_preimage_path"]),
+        )
+        _install_tree(
+            bundle_root / "qos-release",
+            resolve_path(cfg.workdir, paths["qos_release_dir"]),
+        )
+        _install_roster()
+    elif kind == "share-request":
+        # Targets must match where `ceremony reencrypt` reads from:
+        #   - envelopes & approvals: workdir_manifest_subdir (mroot)
+        #   - attestations: --attest-dir (default "attestations")
+        #   - manifest-set: paths.manifest_set_dir
+        mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
+        att_dest = resolve_path(cfg.workdir, "attestations")
+        services = meta.get("services", [])
+        for svc_name in services:
+            _install_file(
+                bundle_root / f"{svc_name}-manifest-envelope.json",
+                mroot / f"{svc_name}-manifest-envelope.json",
+            )
+            _install_file(
+                bundle_root / "attestations" / f"{svc_name}.cose",
+                att_dest / f"{svc_name}.cose",
+            )
+            _install_tree(
+                bundle_root / "approvals" / svc_name,
+                mroot / "approvals" / svc_name,
+            )
+        _install_tree(
+            bundle_root / "manifest-set",
+            resolve_path(cfg.workdir, paths["manifest_set_dir"]),
+        )
+        _install_file(
+            bundle_root / "pcr3-preimage.txt",
+            resolve_path(cfg.workdir, paths["pcr3_preimage_path"]),
+        )
+        _install_roster()
+    elif kind == "approvals":
+        mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
+        _install_tree(bundle_root / "approvals", mroot / "approvals")
+    elif kind == "wrapped-shares":
+        # `ceremony post` reads from --wrapped-in-dir (default
+        # "wrapped-shares-coordinator"); the Coordinator merges each
+        # member's wrapped shares into wrapped-shares-coordinator/<service>/.
+        _install_tree(
+            bundle_root / "wrapped-shares",
+            resolve_path(cfg.workdir, "wrapped-shares-coordinator"),
+        )
+    else:
+        sys.stderr.write(
+            f"bundle install: unsupported kind {kind!r}; extract-only.\n"
+        )
+        return
+
+    print(f"installed {len(installed)} files from {kind} bundle into workdir")
+    for f in installed:
+        print(f"  {f}")
+
+
 def cmd_bundle_extract(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
     archive = resolve_path(cfg.workdir, ns.archive)
     dest = resolve_path(cfg.workdir, ns.bundle_dir)
     if ns.dry_run:
         print(f"[dry-run] extract {archive} to {dest}")
+        if ns.install:
+            print("[dry-run] --install: would distribute files into workdir")
         return
     safe_extract_tar(archive, dest)
     print(f"extracted {archive} to {dest}")
-    if (dest / "SHA256SUMS").is_file():
-        verify_root = dest
-    else:
-        children = [p for p in dest.iterdir() if p.is_dir()]
-        if len(children) != 1:
-            sys.stderr.write(
-                f"cannot locate extracted bundle root under {dest}; expected one child directory\n"
-            )
-            raise SystemExit(2)
-        verify_root = children[0]
+    verify_root = _find_bundle_root(dest)
     verify_sha256sums(verify_root)
     audit_file_hash(audit_log, archive)
+    if ns.install:
+        install_bundle(verify_root, cfg)
+
+
+def cmd_bundle_install(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
+    bundle_dir = resolve_path(cfg.workdir, ns.bundle_dir)
+    root = _find_bundle_root(bundle_dir)
+    if ns.dry_run:
+        meta_path = root / "BUNDLE.json"
+        kind = "unknown"
+        if meta_path.is_file():
+            kind = json.loads(meta_path.read_text(encoding="utf-8")).get("kind", "unknown")
+        print(f"[dry-run] install {kind} bundle from {root} into workdir")
+        return
+    install_bundle(root, cfg)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2147,7 +2341,18 @@ def build_parser() -> argparse.ArgumentParser:
     be = bs.add_parser("extract")
     be.add_argument("--archive", required=True)
     be.add_argument("--bundle-dir", required=True)
+    be.add_argument(
+        "--install",
+        action="store_true",
+        help="after extracting, distribute files into workdir paths per BUNDLE.json kind",
+    )
     be.set_defaults(handler="bundle_extract")
+    bi = bs.add_parser(
+        "install",
+        help="distribute an already-extracted bundle into workdir paths",
+    )
+    bi.add_argument("--bundle-dir", required=True)
+    bi.set_defaults(handler="bundle_install")
 
     kf = subs.add_parser("key-forward")
     kfs = kf.add_subparsers(dest="kf", required=True)
@@ -2212,6 +2417,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "bundle_checksums": lambda: cmd_bundle_checksums(ns, cfg, audit),
         "bundle_verify": lambda: cmd_bundle_verify(ns, cfg, audit),
         "bundle_extract": lambda: cmd_bundle_extract(ns, cfg, audit),
+        "bundle_install": lambda: cmd_bundle_install(ns, cfg, audit),
         "kf_boot": lambda: cmd_keyfwd_boot(ns, cfg, audit),
         "kf_export": lambda: cmd_keyfwd_export(ns, cfg, audit),
         "kf_inject": lambda: cmd_keyfwd_inject(ns, cfg, audit),
