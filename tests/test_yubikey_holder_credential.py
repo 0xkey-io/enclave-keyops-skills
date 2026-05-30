@@ -196,6 +196,8 @@ class ManifestApproveArgvCompositionTests(unittest.TestCase):
         (self.workdir / "manifest").mkdir()
         (self.workdir / "manifest" / "signer-manifest.json").write_text("{}", encoding="utf-8")
         (self.workdir / "qos-release").mkdir()
+        (self.workdir / "qos-release" / "nitro.pcrs").write_text("pcrs", encoding="utf-8")
+        (self.workdir / "qos-release" / "aws-x86_64.pcrs").write_text("pcrs", encoding="utf-8")
         (self.workdir / "pivot-hashes").mkdir()
         (self.workdir / "pivot-hashes" / "signer-pivot-hash.txt").write_text("h", encoding="utf-8")
         (self.workdir / "pcr3-preimage.txt").write_text("p", encoding="utf-8")

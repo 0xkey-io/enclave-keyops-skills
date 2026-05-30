@@ -596,6 +596,20 @@ def check_qos_client(cfg: Config) -> None:
         print(f"qos_client sha256 OK: {h}")
 
 
+def _check_pcrs(qos_release: Path) -> None:
+    """Preflight: warn early if expected PCR files are missing."""
+    expected = ("nitro.pcrs", "aws-x86_64.pcrs")
+    missing = [f for f in expected if not (qos_release / f).is_file()]
+    if missing:
+        sys.stderr.write(
+            f"qos-release directory {qos_release} is missing PCR files: "
+            f"{', '.join(missing)}\n"
+            "qos_client will panic at runtime without these files. Ensure the "
+            "Coordinator's review/genesis-output bundle includes them.\n"
+        )
+        raise SystemExit(2)
+
+
 def check_tools(tools: Sequence[str]) -> None:
     for t in tools:
         p = shutil.which(t)
@@ -991,9 +1005,18 @@ def cmd_manifest_approve(ns: argparse.Namespace, cfg: Config, audit_log: Optiona
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     ms, ss, ps = _manifest_dirs(cfg)
     qos_release = resolve_path(cfg.workdir, cfg.paths()["qos_release_dir"])
+    if not qos_release.is_dir():
+        sys.stderr.write(
+            f"qos-release directory not found: {qos_release}\n"
+            "The review bundle must include qos-release/ with PCR files.\n"
+        )
+        raise SystemExit(2)
+    _check_pcrs(qos_release)
     pcr = resolve_path(cfg.workdir, cfg.paths()["pcr3_preimage_path"])
+    require_file(pcr, "pcr3 preimage")
     hashes = resolve_path(cfg.workdir, cfg.paths()["pivot_hashes_dir"])
     qkp = resolve_path(cfg.workdir, cfg.paths()["quorum_key_pub_path"])
+    require_file(qkp, "quorum_key.pub")
     to_run = cfg.all_services() if not ns.service else [cfg.svc(ns.service)]
     defs = cfg.raw["defaults"]
 
@@ -1804,6 +1827,9 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
         nitro = qos_release / "nitro.pcrs"
         if nitro.is_file():
             copy_file(nitro, root / "qos-release" / "nitro.pcrs")
+        aws_pcrs = qos_release / "aws-x86_64.pcrs"
+        if aws_pcrs.is_file():
+            copy_file(aws_pcrs, root / "qos-release" / "aws-x86_64.pcrs")
     elif kind == "share-request":
         for svc in cfg.all_services():
             copy_file(mroot / f"{svc['name']}-manifest-envelope.json", root / f"{svc['name']}-manifest-envelope.json")
