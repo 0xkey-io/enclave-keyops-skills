@@ -284,9 +284,14 @@ class Config:
         raw: Dict[str, Any],
         *,
         workdir: Path,
+        config_path: Optional[Path] = None,
     ) -> None:
         self.raw = raw
         self.workdir = workdir
+        # When set, in-memory config mutations (e.g. manifest_nonce backfill
+        # during `bundle install`) can be persisted back to disk so a later,
+        # separate keyops invocation reads the updated values.
+        self.config_path = config_path
         self.qos_client = resolve_path(workdir, Path(raw["qos_client_path"]).expanduser())
         if "super_repo_root" in raw:
             sys.stderr.write(
@@ -1370,6 +1375,14 @@ def cmd_ceremony_share_extract(ns: argparse.Namespace, cfg: Config, audit_log: O
         raise SystemExit(2)
     qos_release = resolve_path(cfg.workdir, ns.qos_release_dir or paths["qos_release_dir"])
     pcr = resolve_path(cfg.workdir, ns.pcr3_preimage_path or paths["pcr3_preimage_path"])
+    if not pcr.is_file():
+        sys.stderr.write(
+            f"pcr3-preimage.txt not found: {pcr}\n"
+            "Run `bundle extract --install` on the genesis-output bundle to "
+            "place it automatically, or copy it manually from the bundle.\n"
+        )
+        raise SystemExit(2)
+    _check_pcrs(qos_release)
     check_sensitive_external_path(
         Path(ns.share_path),
         workdir=cfg.workdir,
@@ -1399,6 +1412,8 @@ def cmd_ceremony_share_extract(ns: argparse.Namespace, cfg: Config, audit_log: O
         "--qos-release-dir",
         str(qos_release),
     ]
+    if getattr(ns, "validation_time_override", None):
+        argv += ["--validation-time-override", ns.validation_time_override]
     print(f"== after-genesis alias={ns.alias} member-index={ns.member_index}")
     run_process(argv, dry_run=ns.dry_run, cwd=cfg.workdir, audit_log=audit_log)
     if not ns.dry_run:
@@ -1481,8 +1496,6 @@ def cmd_ceremony_reencrypt(ns: argparse.Namespace, cfg: Config, audit_log: Optio
     confirm_dangerous(ns, "proxy-re-encrypt-share using holder secret/share material", "reencrypt-share")
     if ns.unsafe_skip_attestation:
         confirm_dangerous(ns, "unsafe-skip-attestation disables attestation verification", "unsafe-skip-attestation")
-    if ns.unsafe_auto_confirm:
-        confirm_dangerous(ns, "unsafe-auto-confirm skips qos_client's share re-encryption prompts", "unsafe-auto-confirm")
     ms = resolve_path(cfg.workdir, cfg.paths()["manifest_set_dir"])
     pcr = resolve_path(cfg.workdir, cfg.paths()["pcr3_preimage_path"])
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
@@ -1519,8 +1532,9 @@ def cmd_ceremony_reencrypt(ns: argparse.Namespace, cfg: Config, audit_log: Optio
         ]
         if ns.unsafe_skip_attestation:
             argv.append("--unsafe-skip-attestation")
-        if ns.unsafe_auto_confirm:
-            argv.append("--unsafe-auto-confirm")
+        if getattr(ns, "validation_time_override", None):
+            argv += ["--validation-time-override", ns.validation_time_override]
+        argv.append("--unsafe-auto-confirm")
         print(f"== proxy-re-encrypt-share {svc['name']} member{mid}")
         run_process(argv, dry_run=ns.dry_run, cwd=cfg.workdir, audit_log=audit_log)
         audit_file_hash(audit_log, dest)
@@ -1963,6 +1977,39 @@ def _find_bundle_root(dest: Path) -> Path:
     return children[0]
 
 
+def _backfill_manifest_nonces(meta: Dict[str, Any], cfg: Config) -> None:
+    """Patch config services whose manifest_nonce is null using BUNDLE.json.
+
+    The patched values are persisted back to config.json on disk (when the
+    config path is known) so that a later, separate keyops invocation
+    (`ceremony reencrypt`) reads the correct nonce. An in-memory-only patch
+    would be lost when this `bundle install` process exits.
+    """
+    bundle_nonces = meta.get("manifest_nonces")
+    if not bundle_nonces:
+        return
+    patched = []
+    for svc in cfg.raw["services"]:
+        if svc.get("manifest_nonce") is not None:
+            continue
+        bn = bundle_nonces.get(svc["name"])
+        if bn is not None:
+            svc["manifest_nonce"] = bn
+            patched.append(f"{svc['name']}={bn}")
+    if not patched:
+        return
+    print(f"backfilled manifest_nonce from bundle: {', '.join(patched)}")
+    if cfg.config_path is not None:
+        cfg.config_path.write_text(
+            json.dumps(cfg.raw, indent=2) + "\n", encoding="utf-8"
+        )
+        try:
+            cfg.config_path.chmod(0o600)
+        except OSError:
+            pass
+        print(f"persisted backfilled nonces to {cfg.config_path}")
+
+
 def install_bundle(bundle_root: Path, cfg: Config) -> None:
     """Distribute extracted bundle files into the workdir based on BUNDLE.json kind.
 
@@ -2088,6 +2135,7 @@ def install_bundle(bundle_root: Path, cfg: Config) -> None:
             resolve_path(cfg.workdir, paths["pcr3_preimage_path"]),
         )
         _install_roster()
+        _backfill_manifest_nonces(meta, cfg)
     elif kind == "approvals":
         mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
         _install_tree(bundle_root / "approvals", mroot / "approvals")
@@ -2282,6 +2330,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="defaults to config.paths.pcr3_preimage_path",
     )
+    cse.add_argument(
+        "--validation-time-override",
+        default=None,
+        help="ISO 8601 timestamp to override attestation certificate validation time",
+    )
     cse.set_defaults(handler="cer_share_extract")
     cb = cs.add_parser("boot")
     cb.add_argument("--resolve-pod-ip", action="store_true")
@@ -2309,7 +2362,11 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--wrapped-out-dir", default="wrapped-shares-out")
     cr.add_argument("--approval-alias", default=None)
     cr.add_argument("--unsafe-skip-attestation", action="store_true")
-    cr.add_argument("--unsafe-auto-confirm", action="store_true")
+    cr.add_argument(
+        "--validation-time-override",
+        default=None,
+        help="ISO 8601 timestamp to override attestation certificate validation time",
+    )
     cr.set_defaults(handler="cer_rec")
     cp = cs.add_parser("post")
     cp.add_argument("--wrapped-in-dir", default="wrapped-shares-coordinator")
@@ -2391,7 +2448,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     cfg_path = Path(ns.config).resolve()
     cfg_raw = load_json(cfg_path)
     workdir = Path(ns.workdir).resolve()
-    cfg = Config(cfg_raw, workdir=workdir)
+    cfg = Config(cfg_raw, workdir=workdir, config_path=cfg_path)
     validate_config(cfg)
     hydrate(ns, cfg)
 
