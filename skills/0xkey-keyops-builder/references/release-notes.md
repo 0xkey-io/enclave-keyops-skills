@@ -32,6 +32,44 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.5.5 — 2026-06-01
+
+### Added
+
+- `--validation-time-override` opt-in passthrough for `ceremony share-extract`
+  (forwarded to `qos_client after-genesis`) and, for forward compatibility,
+  `ceremony reencrypt`. NOTE: the current qos_client `proxy-re-encrypt-share`
+  does not accept this flag; for reencrypt cert-expiry use
+  `--unsafe-skip-attestation` until a qos_client build adds support.
+- Preflight checks in `ceremony share-extract`: verifies that
+  `pcr3-preimage.txt` and qos-release PCR files exist before invoking
+  `qos_client`, with actionable error messages pointing to
+  `bundle extract --install`.
+- `bundle install` for `share-request` kind now backfills `manifest_nonce`
+  from `BUNDLE.json` when the config value is `null`, and **persists** the
+  patched values back to `config.json` on disk so the subsequent, separate
+  `ceremony reencrypt` invocation reads the correct nonce. Eliminates manual
+  config editing.
+
+### Changed
+
+- `ceremony reencrypt` now **always** passes `--unsafe-auto-confirm` to
+  `qos_client proxy-re-encrypt-share`. The per-service interactive
+  namespace confirmation (`Is this the correct namespace name?`) was
+  blocking non-interactive agent terminals. The keyops wrapper's own
+  `[confirm]` log line is the security gate; the qos_client layer's
+  redundant prompt is suppressed automatically.
+- `--unsafe-auto-confirm` CLI flag removed from `ceremony reencrypt`
+  argparser (the behavior is now implicit).
+
+> `manifest_nonce` keeps its `null` default in `config.prod.example.json`
+> (a deliberate "force a conscious value" safety property for the
+> Coordinator's `manifest generate`). Members no longer need to edit it
+> by hand because `bundle install` backfills and persists the bundle's
+> nonce automatically.
+
+---
+
 ## 0.5.4 — 2026-05-30
 
 ### Added

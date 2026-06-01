@@ -146,7 +146,8 @@ The following steps are logged to stderr before execution:
 - `post-share`
 - `kubectl apply -k`
 - `unsafe-skip-attestation`
-- `unsafe-auto-confirm`
+- `unsafe-auto-confirm` (implicit for `ceremony reencrypt`; opt-in for
+  `manifest approve`)
 
 These operations proceed without interactive prompts. Safety is enforced by
 argument-level validation (credential checks, path restrictions, roster

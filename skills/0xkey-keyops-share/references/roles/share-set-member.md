@@ -384,8 +384,11 @@ Before re-encrypting, summarize for the user:
 - PCR3 preimage role ARN basename/account
 - approvals included per service
 
-Ask for explicit approval. Do not use `--unsafe-auto-confirm` unless the user
-explicitly says this is non-production/test and wants non-interactive re-encryption.
+Ask for explicit approval before proceeding.
+
+> `--unsafe-auto-confirm` is passed automatically by the keyops wrapper to
+> suppress qos_client's per-service namespace confirmation prompts. The
+> agent's own review step (above) is the security gate.
 
 Run re-encryption. **Use exactly one** holder-credential flag — either
 `--yubikey` or `--secret-path <ext>/.secret`. `--share-path` is always
@@ -412,6 +415,16 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   --secret-path "$KEY_DIR/$ALIAS.secret" \
   --share-path "$KEY_DIR/$ALIAS.share"
 ```
+
+> If attestation verification fails with `InvalidCertChain(CertExpired)`:
+> the current qos_client `proxy-re-encrypt-share` does **not** accept
+> `--validation-time-override` (only `after-genesis` / `ceremony share-extract`
+> does). For `ceremony reencrypt`, the supported workaround today is
+> `--unsafe-skip-attestation` (logged as a dangerous operation; get explicit
+> human approval first). The keyops wrapper exposes `--validation-time-override`
+> as an opt-in passthrough for forward compatibility with a future qos_client
+> build that supports it on `proxy-re-encrypt-share`; do not rely on it until
+> that build ships.
 
 Create the return bundle:
 
