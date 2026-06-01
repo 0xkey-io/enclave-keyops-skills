@@ -416,15 +416,41 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   --share-path "$KEY_DIR/$ALIAS.share"
 ```
 
-> If attestation verification fails with `InvalidCertChain(CertExpired)`:
-> the current qos_client `proxy-re-encrypt-share` does **not** accept
-> `--validation-time-override` (only `after-genesis` / `ceremony share-extract`
-> does). For `ceremony reencrypt`, the supported workaround today is
-> `--unsafe-skip-attestation` (logged as a dangerous operation; get explicit
-> human approval first). The keyops wrapper exposes `--validation-time-override`
-> as an opt-in passthrough for forward compatibility with a future qos_client
-> build that supports it on `proxy-re-encrypt-share`; do not rely on it until
-> that build ships.
+#### Delayed reencrypt (`CertExpired`)
+
+The attestation certificate embedded in the share-request bundle is valid for
+only **~3 hours**. Share Set members often act hours or days later, so
+`InvalidCertChain(CertExpired)` is the single most common blocker on this step.
+
+qos_client's `proxy-re-encrypt-share` has **no** `--validation-time-override`
+(only `after-genesis` / `ceremony share-extract` does — passing it to
+`reencrypt` would make qos_client reject the run with an unexpected-input
+error). The only supported path for an expired cert is to skip attestation
+verification entirely:
+
+```bash
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  ceremony reencrypt \
+  --alias "$ALIAS" \
+  --member-index "$MEMBER_INDEX" \
+  --yubikey \
+  --share-path "$KEY_DIR/$ALIAS.share" \
+  --unsafe-skip-attestation
+```
+
+Before using `--unsafe-skip-attestation`:
+
+1. **Confirm out-of-band** that the bundle came from the real Coordinator over a
+   trusted channel — skipping attestation removes the cryptographic proof that
+   the ephemeral key belongs to a genuine, expected enclave, so the
+   bundle's authenticity is now entirely on you.
+2. Get explicit human approval; this is a dangerous operation. The keyops
+   wrapper gates it behind `confirm_dangerous` and records the run (with the
+   `unsafe-skip-attestation` flag) in the audit log — keep that log as the audit
+   trail for the delayed reencrypt.
+3. Prefer asking the Coordinator to re-run `ceremony attestation` and ship a
+   fresh bundle when feasible; only fall back to skipping when a re-attestation
+   round-trip is not practical.
 
 `ceremony reencrypt` needs no `--approval-alias`. It signs a share-set approval
 with the holder credential and writes it to

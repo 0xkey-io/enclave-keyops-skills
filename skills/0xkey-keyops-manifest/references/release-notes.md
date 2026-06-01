@@ -32,6 +32,44 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.5.7 — 2026-06-02
+
+Role-feedback round after the v0.5.6 production Genesis (Coordinator + Share Set
+member). No breaking changes.
+
+### Fixed
+
+- `ceremony reencrypt` no longer accepts `--validation-time-override`. qos_client's
+  `proxy-re-encrypt-share` parser has no such token (only `after-genesis` /
+  `ceremony share-extract` does), so the wrapper was passing a flag that qos_client
+  rejects with an unexpected-input error — the option could never have worked. For
+  an expired attestation cert the only supported path is `--unsafe-skip-attestation`;
+  see the new delayed-reencrypt runbook. `ceremony share-extract` keeps
+  `--validation-time-override` unchanged.
+
+### Added
+
+- `bundle create --archive` no longer requires `--bundle-dir`. When only `--archive`
+  is given, the bundle is staged in a throwaway temp directory and removed after
+  packing, so re-runs never fail with "bundle dir already exists". Passing
+  `--bundle-dir` (with or without `--archive`) behaves as before; passing neither
+  now errors clearly.
+
+### Docs
+
+- share-set-member.md: standardized **delayed reencrypt** runbook for
+  `InvalidCertChain(CertExpired)` — when to use `--unsafe-skip-attestation`, the
+  out-of-band bundle-authenticity check it forces on the member, the audit-log
+  trail, and preferring a fresh Coordinator re-attestation when practical. Removed
+  the stale "`--validation-time-override` is a forward-compat passthrough" note.
+- coordinator.md: documented how the post-share order is resolved
+  (`services[].post_share_members_order` → `--post-global-order` → default `[1, 2]`)
+  and its accepted formats (JSON int array or comma string, `m` prefix stripped).
+- config.prod.example.json: per-service `$post_share_members_order_comment`
+  describing the field's format and fallback semantics.
+
+---
+
 ## 0.5.6 — 2026-06-01
 
 ### Fixed
