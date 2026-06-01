@@ -32,6 +32,46 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.5.6 — 2026-06-01
+
+### Fixed
+
+- `ceremony reencrypt` now names the Share Set Approval it produces by the
+  share alias — `share-set-approvals/<service>/<alias>-<namespace>-<nonce>.approval`
+  — instead of borrowing a manifest-set approval's filename. The previous code
+  ran an `approval_for` lookup and a dead `shutil.copy2`, and required a
+  `--approval-alias` that `role_init` never set (so the documented flow errored,
+  forcing members to pass their manifest alias by hand and producing a
+  `manifest-`prefixed file that collided with the Coordinator's own approval on
+  install). `qos_client proxy-re-encrypt-share` only *writes* `--approval-path`
+  (it never reads it), so keyops now owns the output filename directly.
+  `--approval-alias` is removed from `ceremony reencrypt`.
+
+### Added
+
+- `bundle create --kind wrapped-shares` now packages the matching share-set
+  approvals from the dedicated `share-set-approvals/` directory, and
+  `bundle install` merges them into the Coordinator's `manifest/approvals/`,
+  so `ceremony post` finds the share-set approval automatically. Older bundles
+  without an `approvals/` directory still install (backward compatible).
+- `host_ip` field documented in `config.prod.example.json` (per-service) for
+  choosing between cluster-internal `--resolve-pod-ip` and cluster-external
+  `kubectl port-forward`, plus a `manifest_nonce` guidance comment.
+
+### Docs
+
+- WORKFLOWS.md: 3-hour attestation-cert window on Phase 5; a Phase 7–9 **Pod
+  atomicity invariant** (container restart is safe, deleting/recreating a Pod
+  destroys the ephemeral key; `WaitingForQuorumShards` crash-loops are
+  expected); share-set approvals in Phase 8 output and the B4 fan-in barrier;
+  `DecryptionFailed` / `CertExpired` recovery entries.
+- coordinator.md: Network Topology table, a post-share pre-flight checklist
+  (the `--approval-alias` for `ceremony post` must reference a **share-set**
+  member), `manifest_nonce` / patch-set preconditions, and new troubleshooting
+  rows.
+- SECURITY.md and share-set-member.md: post-share approval must be share-set
+  signed; `ceremony reencrypt` needs no `--approval-alias`.
+
 ## 0.5.5 — 2026-06-01
 
 ### Added
