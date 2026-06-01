@@ -300,7 +300,7 @@ state here to find the next safe action:
 |------------------------|-----------------------|-------------------------|
 | `WaitingForBootInstruction` | Genesis target / data-plane pod is up but neither `boot-genesis` nor `boot-standard` has been issued | First-time ceremony: run `ceremony genesis-boot`. Otherwise (rotation, redeploy): run `ceremony boot` |
 | `GenesisBooted` | `boot-genesis` succeeded; per-member encrypted shares + `quorum_key.pub` were produced | Bundle `genesis-output`, ship to Share members, wait for their `share-extract` confirmation |
-| `WaitingForQuorumShards` | `boot-standard` finished and the enclave is ready to ingest re-encrypted shares | Run `ceremony attestation`, ship the share-request bundle, then `ceremony post` once the threshold of wrapped shares returns |
+| `WaitingForQuorumShards` | `boot-standard` finished and the enclave is ready to ingest re-encrypted shares | Run `ceremony attestation`, ship the share-request bundle, then `ceremony post` once the threshold of wrapped shares returns. Note: app containers will crash-loop (30+ restarts) because the quorum key is not yet provisioned — this is expected. Do **not** delete Pods. |
 | `QuorumKeyProvisioned` | `post-share` completed for this service | Run `verify` (control plane + `:8081/health` + business smoke); only consider the ceremony done when all five services reach this state |
 
 ## Run The Role
@@ -359,6 +359,15 @@ is operator's choice (see SKILL.md `Exchange transport`).
 
 ### Manifest
 
+Before generating manifests, ensure:
+
+- `config.json` has `manifest_nonce` set to a non-null integer for every service.
+  The template ships `null` intentionally (a safety property that forces a
+  conscious first value). For the first ceremony set each service's
+  `manifest_nonce` to `0`. For subsequent ceremonies increment by 1.
+- `shared/patch-set/quorum_threshold` exists. If the patch-set is disabled,
+  create the file with content `0`.
+
 Generate canonical manifests:
 
 ```bash
@@ -401,6 +410,23 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" deploy render
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" deploy apply
 ```
 
+### Network Topology
+
+Choose one connectivity mode before running `ceremony boot`, `ceremony attestation`, and `ceremony post`:
+
+| Scenario | Configuration |
+|---|---|
+| Running from within the cluster (jumpbox with Pod network routing) | Use `--resolve-pod-ip` on every command; no extra config needed |
+| Running from a local machine via `kubectl` | Set `"host_ip": "127.0.0.1"` in each service entry in `config.json`, then open a port-forward for each service before running the command |
+
+Port-forward example (run one per service in background terminals):
+
+```bash
+kubectl -n "$K8S_NAMESPACE" port-forward   "$(kubectl -n "$K8S_NAMESPACE" get pod -l app=<service> -o jsonpath='{.items[0].metadata.name}')"   <host_port_qos>:<host_port_qos>
+```
+
+When `host_ip` is set in `config.json`, omit `--resolve-pod-ip` from all ceremony commands.
+
 Boot and attest:
 
 ```bash
@@ -423,8 +449,31 @@ shasum -a 256 "$WORKDIR/bundles/share-request-${STAMP}.tgz" \
   > "$WORKDIR/bundles/share-request-${STAMP}.tgz.sha256"
 ```
 
-After wrapped-share bundles return, extract and verify each bundle, then copy
-wrapped shares into `wrapped-shares-coordinator/<service>/`.
+After wrapped-share bundles return, extract and verify each bundle:
+
+```bash
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  bundle extract --install --archive "inbox/<member>-wrapped-shares-<stamp>.tgz"
+```
+
+`bundle extract --install` automatically places wrapped shares into
+`wrapped-shares-coordinator/<service>/` and merges the share-set approvals into
+`manifest/approvals/<service>/`.
+
+Post-share pre-flight checklist (verify before running `ceremony post`):
+
+- [ ] Pods have **not** been deleted or recreated since `ceremony attestation`
+      (container restarts are safe; Pod delete/recreate is not)
+- [ ] `wrapped-shares-coordinator/<service>/` contains `member<n>_eph_wrapped.share`
+      for at least the share threshold count of members
+- [ ] `manifest/approvals/<service>/` contains at least one approval with a
+      `share-*` filename prefix (share-set approval) for every service
+- [ ] Network connectivity confirmed (port-forward running or `--resolve-pod-ip` reachable)
+
+> **NOTE**: `--approval-alias` for `ceremony post` must be a **share-set** alias
+> (e.g. `share-torben`), not a manifest-set alias. Using a manifest-set alias
+> causes `NotShareSetMember` because the enclave verifies the approval signer
+> against `shareSet.members[]` in the manifest.
 
 Post shares:
 
@@ -457,6 +506,16 @@ those containers may be minimal images without shell tooling. Use the skill
 `verify` command, which performs temporary `kubectl port-forward` checks from
 outside the containers, or use an explicit jumpbox / local port-forward fallback
 with equivalent HTTP checks.
+
+## Troubleshooting
+
+| Error | Cause | Resolution |
+|---|---|---|
+| `ProtocolErrorResponse(DecryptionFailed)` on `ceremony post` | Pod was deleted/recreated after attestation; ephemeral key destroyed | Redo: `ceremony attestation` → new share-request bundle → Share members reencrypt → collect wrapped-shares bundles → `ceremony post` |
+| `NotShareSetMember` on `ceremony post` | `--approval-alias` is a manifest-set alias; enclave checks shareSet membership | Use the share-set alias (e.g. `share-torben`) for `--approval-alias` |
+| `expected exactly one approval ... found 0` for share-set alias | The wrapped-shares bundle did not carry the member's share-set approval (older keyops, or `--approval-alias` does not match the member's `--alias`) | Confirm the bundle was built with keyops >= 0.5.6; the share-set approval is named `<member-alias>-<namespace>-<nonce>.approval`. Use that member alias for `--approval-alias` |
+| `InvalidCertChain(CertExpired)` on `ceremony share-extract` | genesis_attestation_doc leaf cert expired (3-hour validity window) | Ask Share members to add `--validation-time-override <genesis-boot-UTC-timestamp>` to `ceremony share-extract` |
+| `Connection Failed / connection timed out` on ceremony commands | Using `--resolve-pod-ip` from outside the cluster network | Switch to `host_ip` + `kubectl port-forward` (see Network Topology section) |
 
 ## Output To User
 

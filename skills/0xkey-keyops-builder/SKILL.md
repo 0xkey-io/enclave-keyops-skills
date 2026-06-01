@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-builder
-version: 0.5.5
+version: 0.5.6
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Builder / release operator role:
   producing verifiable qos_client (release + operator-native), qOS release with
@@ -127,7 +127,7 @@ Builder's required outputs and how they feed Coordinator / members:
 
 ## Version & update
 
-This skill is version `0.5.5` (see the frontmatter at the top of this
+This skill is version `0.5.6` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any

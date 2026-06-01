@@ -426,7 +426,15 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
 > build that supports it on `proxy-re-encrypt-share`; do not rely on it until
 > that build ships.
 
-Create the return bundle:
+`ceremony reencrypt` needs no `--approval-alias`. It signs a share-set approval
+with the holder credential and writes it to
+`share-set-approvals/<service>/<alias>-<namespace>-<nonce>.approval` (named from
+`--alias`). The Coordinator later selects it with `ceremony post --approval-alias
+<alias>`, so the file name must carry the share-set alias, not a manifest alias.
+
+Create the return bundle. `bundle create --kind wrapped-shares` packages both the
+wrapped shares and the share-set approvals produced above, so the Coordinator
+gets everything `ceremony post` needs in one handoff:
 
 ```bash
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)

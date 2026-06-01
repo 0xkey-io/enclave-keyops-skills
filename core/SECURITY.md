@@ -309,9 +309,17 @@ the skill's `verify` command, local port-forward, or a controlled jumpbox.
   or posting.
 - Prefer `bundle create --kind ... --archive ...` and `bundle extract --archive
   ...` over manual directory assembly.
-- `post-share` and `proxy-re-encrypt-share` must select approvals explicitly via
-  `--approval-alias` or `config.approval_alias`; matching includes service
-  namespace and nonce.
+- `post-share` must select an approval explicitly via `--approval-alias` or
+  `config.approval_alias`; matching includes service namespace and nonce.
+- `post-share --approval-path` must reference an approval signed by a
+  **share-set member** (file named `<share-alias>-<namespace>-<nonce>.approval`).
+  The enclave verifies that the approval signer's public key appears in
+  `shareSet.members[]` in the manifest; a manifest-set approval causes
+  `NotShareSetMember`. `ceremony reencrypt` always produces this share-set
+  approval (signed with the holder's share-set key, named from its `--alias`)
+  under `share-set-approvals/<service>/`, and the wrapped-shares bundle carries
+  it back to the Coordinator automatically. The Coordinator then runs
+  `ceremony post --approval-alias <share-alias>`.
 
 ## 9. Threshold Recommendations
 

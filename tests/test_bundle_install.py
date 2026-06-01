@@ -185,6 +185,59 @@ class InstallRoundTripTests(unittest.TestCase):
                 f"wrapped share for {s} must land in wrapped-shares-coordinator",
             )
 
+    def test_wrapped_shares_includes_share_set_approvals(self) -> None:
+        """share-set-approvals/ should be packaged into the wrapped-shares
+        bundle and installed into the Coordinator's manifest/approvals/."""
+        cfg, wd = self._cfg("src_wrap_appr")
+        svcs = self._services(cfg)
+        for s in svcs:
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+            _touch(wd / "share-set-approvals" / s / f"share-alice-0xkey-{s}-0.approval")
+
+        broot = wd / "outbox" / "wrap_appr"
+        ek.create_bundle(broot, "wrapped-shares", cfg)
+
+        # Verify bundle contains approvals/ alongside wrapped-shares/
+        for s in svcs:
+            self.assertTrue(
+                (broot / "approvals" / s / f"share-alice-0xkey-{s}-0.approval").is_file(),
+                f"bundle must contain share-set approval for {s}",
+            )
+
+        cfg2, wd2 = self._cfg("coord_wrap_appr")
+        ek.install_bundle(broot, cfg2)
+        mroot2 = wd2 / cfg2.paths()["workdir_manifest_subdir"]
+        for s in svcs:
+            self.assertTrue(
+                (wd2 / "wrapped-shares-coordinator" / s / "member1_eph_wrapped.share").is_file(),
+                f"wrapped share for {s} must land in wrapped-shares-coordinator",
+            )
+            self.assertTrue(
+                (mroot2 / "approvals" / s / f"share-alice-0xkey-{s}-0.approval").is_file(),
+                f"share-set approval for {s} must land in Coordinator approvals",
+            )
+
+    def test_wrapped_shares_backward_compat_no_approvals(self) -> None:
+        """Bundles created before the share-set-approvals feature (no
+        approvals/ dir) must still install without errors."""
+        cfg, wd = self._cfg("src_wrap_old")
+        svcs = self._services(cfg)
+        for s in svcs:
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+        # No share-set-approvals/ directory
+
+        broot = wd / "outbox" / "wrap_old"
+        ek.create_bundle(broot, "wrapped-shares", cfg)
+        self.assertFalse((broot / "approvals").exists(),
+                         "bundle without share-set-approvals should have no approvals dir")
+
+        cfg2, wd2 = self._cfg("coord_wrap_old")
+        ek.install_bundle(broot, cfg2)
+        for s in svcs:
+            self.assertTrue(
+                (wd2 / "wrapped-shares-coordinator" / s / "member1_eph_wrapped.share").is_file(),
+            )
+
     # ----- approvals ---------------------------------------------------------
     def test_approvals_round_trip(self) -> None:
         cfg, wd = self._cfg("src_appr")

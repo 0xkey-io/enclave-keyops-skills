@@ -9,6 +9,7 @@ from ._helpers import load_enclave_keyops
 
 ek = load_enclave_keyops()
 approval_for = ek.approval_for
+approval_filename = ek.approval_filename
 
 
 def make_approvals(root: Path, names) -> None:
@@ -73,6 +74,42 @@ class ApprovalForTests(unittest.TestCase):
         )
         with self.assertRaises(SystemExit) as cm:
             approval_for(self.mroot, self.svc, "manifester1")
+        self.assertEqual(cm.exception.code, 2)
+
+
+class ApprovalFilenameTests(unittest.TestCase):
+    """`ceremony reencrypt` names the share-set approval it produces with the
+    share alias so the Coordinator selects it via `post --approval-alias`."""
+
+    def setUp(self) -> None:
+        self.svc = {
+            "name": "signer",
+            "manifest_namespace": "0xkey/signer",
+            "manifest_nonce": 0,
+        }
+
+    def test_uses_share_alias_namespace_and_nonce(self) -> None:
+        self.assertEqual(
+            approval_filename("share-torben", self.svc),
+            "share-torben-0xkey-signer-0.approval",
+        )
+
+    def test_roundtrips_with_approval_for(self) -> None:
+        # A file named by approval_filename must be findable by approval_for
+        # using the same alias, namespace, and nonce.
+        ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(ctx.cleanup)
+        mroot = Path(ctx.name)
+        name = approval_filename("share-torben", self.svc)
+        make_approvals(mroot, [name[: -len(".approval")]])
+        match = approval_for(mroot, self.svc, "share-torben")
+        self.assertEqual(match.name, name)
+
+    def test_requires_nonce(self) -> None:
+        svc = dict(self.svc)
+        svc["manifest_nonce"] = None
+        with self.assertRaises(SystemExit) as cm:
+            approval_filename("share-torben", svc)
         self.assertEqual(cm.exception.code, 2)
 
 

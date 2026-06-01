@@ -26,10 +26,10 @@ package ships this file.
 | 2. Key generation | Manifest x M / Share x N | parallel after roster | assigned alias/index + `qos_client` | each `outbox/<alias>.pub`; private key stays in YubiKey or external vault |
 | 3. Public-key fan-in | Coordinator | fan-in | all `.pub`, thresholds, `dr-key.pub` | full `shared/{manifest,share,patch}-set/`; `doctor coordinator` passes |
 | 4. Genesis | Coordinator | serial + human gate | Phase 3 output + healthy Genesis target | `quorum_key.pub` + `genesis-output-*.tgz` |
-| 5. Share extract | Share x N | parallel, then fan-in | `genesis-output-*.tgz` + holder credential | each member writes `.share` to external vault and confirms extraction |
+| 5. Share extract | Share x N | parallel, then fan-in | `genesis-output-*.tgz` + holder credential | each member writes `.share` to external vault and confirms extraction (TIME-SENSITIVE: must complete within 3 hours of genesis-boot) |
 | 6. Manifest review and approval | Coordinator -> Manifest x M | Coordinator serial, members parallel | `manifest-review-*.tgz` | approval bundles collected by Coordinator |
 | 7. boot-standard and attestation | Coordinator | serial + human gate | manifest threshold approvals + envelopes | services reach `WaitingForQuorumShards`; `share-request-*.tgz` |
-| 8. Share re-encryption | Share x N | parallel, then fan-in | `share-request-*.tgz` + `.share` + holder credential | wrapped-share bundles |
+| 8. Share re-encryption | Share x N | parallel, then fan-in | `share-request-*.tgz` + `.share` + holder credential | wrapped-share bundles + share-set approvals |
 | 9. post-share and verify | Coordinator | per-service serial | share threshold wrapped shares | all services `QuorumKeyProvisioned`, `:8081/health`, business smoke |
 
 ## 2. Sequence Diagram
@@ -112,6 +112,7 @@ sequenceDiagram
       note over C: Phase 7 - boot-standard and attestation
       C->>C: deploy render, human gate, deploy apply
       C->>C: ceremony boot; ceremony attestation
+      note over C: CRITICAL: do NOT delete Pods between attestation and post-share
       C->>C: bundle create --kind share-request
       C-->>S: share-request-*.tgz + SHA256
     end
@@ -119,7 +120,7 @@ sequenceDiagram
     rect rgb(235,255,235)
       note over S: Phase 8 - re-encryption
       par Share members
-        S->>S: ceremony reencrypt -> wrapped-share bundle
+        S->>S: ceremony reencrypt -> wrapped-share bundle + share-set approvals
       end
       S-->>C: wrapped-share bundles
     end
@@ -209,7 +210,7 @@ flowchart LR
 | B1, Phase 3 | all `.pub` files | 100%; any missing or roster-mismatched `.pub` blocks `doctor coordinator` | see 6.1 |
 | B2, Phase 5 | Share extraction confirmations | 100%; otherwise that member cannot participate in later share re-encryption | see 6.3 |
 | B3, Phase 6 -> 7 | approval bundles | count >= manifest threshold | see 6.4 |
-| B4, Phase 8 -> 9 | wrapped-share bundles | count >= share threshold | see 6.5 |
+| B4, Phase 8 -> 9 | wrapped-share bundles + share-set approvals | count >= share threshold; each bundle must include share-set approvals for `ceremony post` | see 6.5 |
 
 B1 and B2 are strict 100% barriers. B3 and B4 are threshold barriers, but the
 threshold itself must not be changed mid-ceremony.
@@ -253,7 +254,34 @@ threshold itself must not be changed mid-ceremony.
 
 Use the same threshold logic as approvals, but for the Share Set threshold.
 
-### 6.6 Phase 9 post-share Order Failure
+| Symptom | Handling |
+|---|---|
+| `ceremony post` returns `NotShareSetMember` | `--approval-alias` references a manifest-set alias; switch to the share-set alias (e.g. `share-torben`) |
+| `expected exactly one approval ... found 0` for a share-set alias | The wrapped-shares bundle did not carry the member's share-set approval, or `--approval-alias` does not match the member's `--alias` | Confirm the bundle was built with keyops >= 0.5.6 (share-set approval named `<member-alias>-<namespace>-<nonce>.approval`); pass that member alias to `ceremony post --approval-alias` |
+| `ProtocolErrorResponse(DecryptionFailed)` on `ceremony post` | A Pod was deleted and recreated after attestation; the ephemeral key changed. Full recovery: redo `ceremony attestation` → new share-request bundle → member reencrypt → collect wrapped shares → post |
+
+### 6.6 Phase 7-9 Pod Atomicity Invariant
+
+> **CRITICAL**: Between Phase 7 (attestation) and Phase 9 (post-share), Pods must
+> not be deleted or recreated. The ephemeral key is bound to the Pod lifetime, not
+> to the container lifetime:
+>
+> - **Container restart** (enclave process crashes and restarts): safe — the
+>   ephemeral key is preserved and existing wrapped shares remain valid.
+> - **Pod delete / recreate**: destructive — the ephemeral key is destroyed and
+>   all collected wrapped shares are permanently invalid.
+>
+> During `WaitingForQuorumShards`, app containers crash-loop because they cannot
+> start without a quorum key. This is normal. Do **not** delete Pods to resolve
+> the crash-loop; wait and continue with `ceremony post`.
+
+| Symptom | Handling |
+|---|---|
+| `ProtocolErrorResponse(DecryptionFailed)` on `ceremony post` | Pod was deleted/recreated after attestation; ephemeral key is gone. Redo: `ceremony attestation` → new share-request bundle → member reencrypt → collect wrapped-shares bundles → post |
+| `InvalidCertChain(CertExpired)` on `ceremony share-extract` | The genesis_attestation_doc leaf cert expired (~3-hour validity). Ask Share members to retry with `--validation-time-override <genesis-boot-UTC-timestamp>` |
+| `WaitingForQuorumShards` with 30+ container restarts | Normal — app containers cannot start without a quorum key. Do not delete Pods. |
+
+### 6.7 Phase 9 post-share Order Failure
 
 | Symptom | Handling |
 |---|---|
@@ -261,7 +289,7 @@ Use the same threshold logic as approvals, but for the Share Set threshold.
 | Multiple services fail | First check attestation document freshness, then check ordering |
 | One service remains permanently stuck | Roll that service back to Phase 7 and redo boot/attestation/share-request/reencrypt/post for that service |
 
-### 6.7 Full Ceremony Abort
+### 6.8 Full Ceremony Abort
 
 Abort the full ceremony rather than trying local recovery when:
 
