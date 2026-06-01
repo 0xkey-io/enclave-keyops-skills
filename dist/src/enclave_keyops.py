@@ -1501,12 +1501,17 @@ def cmd_ceremony_reencrypt(ns: argparse.Namespace, cfg: Config, audit_log: Optio
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     att_root = resolve_path(cfg.workdir, ns.attest_dir)
     out_root = resolve_path(cfg.workdir, ns.wrapped_out_dir)
+    ss_approvals_root = resolve_path(cfg.workdir, ns.share_set_approvals_dir)
     mid = ns.member_index
     ap_alias = approval_alias(ns, cfg)
     for svc in cfg.all_services():
         envpath = mroot / f"{svc['name']}-manifest-envelope.json"
         adoc = att_root / f"{svc['name']}.cose"
         approval = approval_for(mroot, svc, ap_alias)
+        ss_dir = ss_approvals_root / svc["name"]
+        ss_dir.mkdir(parents=True, exist_ok=True)
+        staged = ss_dir / approval.name
+        shutil.copy2(approval, staged)
         dest = out_root / svc["name"] / f"member{mid}_eph_wrapped.share"
         dest.parent.mkdir(parents=True, exist_ok=True)
         argv = [
@@ -1522,7 +1527,7 @@ def cmd_ceremony_reencrypt(ns: argparse.Namespace, cfg: Config, audit_log: Optio
             "--eph-wrapped-share-path",
             str(dest),
             "--approval-path",
-            str(approval),
+            str(staged),
             "--manifest-envelope-path",
             str(envpath),
             "--manifest-set-dir",
@@ -1855,6 +1860,9 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
         copy_tree_contents(mroot / "approvals", root / "approvals")
     elif kind == "wrapped-shares":
         copy_tree_contents(resolve_path(cfg.workdir, "wrapped-shares-out"), root / "wrapped-shares")
+        ss_approvals = resolve_path(cfg.workdir, "share-set-approvals")
+        if ss_approvals.is_dir():
+            copy_tree_contents(ss_approvals, root / "approvals")
     elif kind == "genesis-output":
         # Genesis-output bundle is built on the Coordinator after `ceremony
         # genesis-boot` and shipped to every Share Set member so they can run
@@ -2147,6 +2155,9 @@ def install_bundle(bundle_root: Path, cfg: Config) -> None:
             bundle_root / "wrapped-shares",
             resolve_path(cfg.workdir, "wrapped-shares-coordinator"),
         )
+        if (bundle_root / "approvals").is_dir():
+            mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
+            _install_tree(bundle_root / "approvals", mroot / "approvals")
     else:
         sys.stderr.write(
             f"bundle install: unsupported kind {kind!r}; extract-only.\n"
@@ -2360,6 +2371,7 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--member-index", type=int, required=True)
     cr.add_argument("--attest-dir", default="attestations")
     cr.add_argument("--wrapped-out-dir", default="wrapped-shares-out")
+    cr.add_argument("--share-set-approvals-dir", default="share-set-approvals")
     cr.add_argument("--approval-alias", default=None)
     cr.add_argument("--unsafe-skip-attestation", action="store_true")
     cr.add_argument(
