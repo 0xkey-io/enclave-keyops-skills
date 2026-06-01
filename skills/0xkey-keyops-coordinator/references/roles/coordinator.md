@@ -488,6 +488,22 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
 Use the documented post-share order from the deployment runbook unless the
 active ceremony config says otherwise.
 
+**Post-share order — where it comes from.** For each service, the order in which
+wrapped shares are installed is resolved as:
+
+1. `services[].post_share_members_order` in `config.json`, if set. Accepts a JSON
+   array of member indices (`[1, 2]`) or a comma string (`"1,2"` or `"m1,m2"` —
+   the `m` prefix is stripped). This pins a per-service order.
+2. otherwise the `--post-global-order` flag (same comma-string syntax), applied to
+   every service.
+3. otherwise the default `[1, 2]`.
+
+The indices are `member_index` values from `shared/member-roster.json`, and the
+order only needs to list enough members to satisfy the share-set threshold (the
+default `[1, 2]` assumes a 2-of-N share set). Keep a service-specific order in
+`post_share_members_order` only when one service must differ; otherwise leave it
+`null` and pass `--post-global-order` once.
+
 Verify:
 
 ```bash

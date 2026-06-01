@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -1549,9 +1550,11 @@ def cmd_ceremony_reencrypt(ns: argparse.Namespace, cfg: Config, audit_log: Optio
             str(pcr),
         ]
         if ns.unsafe_skip_attestation:
+            # qos_client `proxy-re-encrypt-share` has no
+            # `--validation-time-override` (unlike `after-genesis`/share-extract),
+            # so an expired attestation cert can only be worked around by
+            # skipping verification entirely. See the "delayed reencrypt" runbook.
             argv.append("--unsafe-skip-attestation")
-        if getattr(ns, "validation_time_override", None):
-            argv += ["--validation-time-override", ns.validation_time_override]
         argv.append("--unsafe-auto-confirm")
         print(f"== proxy-re-encrypt-share {svc['name']} member{mid}")
         run_process(argv, dry_run=ns.dry_run, cwd=cfg.workdir, audit_log=audit_log)
@@ -1969,20 +1972,42 @@ def make_tar_gz(src: Path, archive: Path) -> None:
 
 
 def cmd_bundle_create(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
-    root = resolve_path(cfg.workdir, ns.bundle_dir)
+    if not ns.bundle_dir and not ns.archive:
+        sys.stderr.write("bundle create requires --bundle-dir, --archive, or both\n")
+        raise SystemExit(2)
+    archive = resolve_path(cfg.workdir, ns.archive) if ns.archive else None
+    # When only --archive is given, stage the bundle in a throwaway temp dir so
+    # re-runs never collide on an existing --bundle-dir. The caller only cares
+    # about the .tar.gz, so the staging dir is removed afterwards.
+    ephemeral = ns.bundle_dir is None
+    if ns.bundle_dir:
+        root = resolve_path(cfg.workdir, ns.bundle_dir)
+    else:
+        root = Path(tempfile.mkdtemp(prefix=f"keyops-bundle-{ns.kind}-", dir=str(cfg.workdir)))
     if ns.dry_run:
-        print(f"[dry-run] create {ns.kind} bundle under {root}")
-        if ns.archive:
-            print(f"[dry-run] pack bundle archive {resolve_path(cfg.workdir, ns.archive)}")
+        where = "temp staging dir" if ephemeral else root
+        print(f"[dry-run] create {ns.kind} bundle under {where}")
+        if archive:
+            print(f"[dry-run] pack bundle archive {archive}")
+        if ephemeral:
+            shutil.rmtree(root, ignore_errors=True)
         return
-    create_bundle(root, ns.kind, cfg)
-    print(f"created {ns.kind} bundle: {root}")
-    audit_file_hash(audit_log, root / "SHA256SUMS")
-    if ns.archive:
-        archive = resolve_path(cfg.workdir, ns.archive)
-        make_tar_gz(root, archive)
-        print(f"packed {archive}")
-        audit_file_hash(audit_log, archive)
+    try:
+        if ephemeral:
+            # mkdtemp already created `root`; create_bundle refuses a
+            # pre-existing dir, so build into a fresh child it owns.
+            root = root / "bundle"
+        create_bundle(root, ns.kind, cfg)
+        if not ephemeral:
+            print(f"created {ns.kind} bundle: {root}")
+        audit_file_hash(audit_log, root / "SHA256SUMS")
+        if archive:
+            make_tar_gz(root, archive)
+            print(f"packed {archive}")
+            audit_file_hash(audit_log, archive)
+    finally:
+        if ephemeral:
+            shutil.rmtree(root.parent, ignore_errors=True)
 
 
 def _find_bundle_root(dest: Path) -> Path:
@@ -2385,11 +2410,12 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--attest-dir", default="attestations")
     cr.add_argument("--wrapped-out-dir", default="wrapped-shares-out")
     cr.add_argument("--share-set-approvals-dir", default="share-set-approvals")
-    cr.add_argument("--unsafe-skip-attestation", action="store_true")
     cr.add_argument(
-        "--validation-time-override",
-        default=None,
-        help="ISO 8601 timestamp to override attestation certificate validation time",
+        "--unsafe-skip-attestation",
+        action="store_true",
+        help="skip attestation verification; the only way to reencrypt against an "
+        "expired attestation cert (qos_client proxy-re-encrypt-share has no "
+        "--validation-time-override). See the delayed-reencrypt runbook.",
     )
     cr.set_defaults(handler="cer_rec")
     cp = cs.add_parser("post")
@@ -2410,7 +2436,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=("review", "share-request", "approvals", "wrapped-shares", "genesis-output"),
     )
-    bcr.add_argument("--bundle-dir", required=True)
+    bcr.add_argument(
+        "--bundle-dir",
+        default=None,
+        help="staging dir for the bundle; optional when --archive is given "
+        "(a temp dir is used and removed after packing)",
+    )
     bcr.add_argument("--archive", default=None)
     bcr.set_defaults(handler="bundle_create")
     bc = bs.add_parser("checksums")

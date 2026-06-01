@@ -409,5 +409,81 @@ class InstallSymlinkedWorkdirTests(unittest.TestCase):
             self.assertTrue((mroot2 / "approvals" / "signer" / "a.approval").is_file())
 
 
+class BundleCreateArchiveTests(unittest.TestCase):
+    """`bundle create --archive` without --bundle-dir must stage into a temp dir
+    that is removed afterwards, so repeated runs never collide on an existing
+    --bundle-dir (Coordinator "bundle dir already exists" friction)."""
+
+    def setUp(self) -> None:
+        self._ctx = tempfile.TemporaryDirectory()
+        self.base = Path(self._ctx.name).resolve()
+
+    def tearDown(self) -> None:
+        self._ctx.cleanup()
+
+    def _cfg(self, name: str):
+        wd = self.base / name
+        wd.mkdir(parents=True, exist_ok=True)
+        return ek.Config(_base_raw(), workdir=wd), wd
+
+    def _ns(self, **kw):
+        defaults = dict(kind="wrapped-shares", bundle_dir=None, archive=None, dry_run=False)
+        defaults.update(kw)
+        return ek.argparse.Namespace(**defaults)
+
+    def _seed_wrapped(self, cfg, wd) -> None:
+        for s in (s["name"] for s in cfg.all_services()):
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+
+    def test_archive_only_packs_and_cleans_temp_dir(self) -> None:
+        cfg, wd = self._cfg("src_archive_only")
+        self._seed_wrapped(cfg, wd)
+        before = set(wd.iterdir())
+
+        ek.cmd_bundle_create(self._ns(archive="out/wrap.tgz"), cfg, None)
+
+        archive = wd / "out" / "wrap.tgz"
+        self.assertTrue(archive.is_file(), "archive must be produced")
+        # No leftover keyops-bundle-* staging dir in the workdir.
+        leftover = [p for p in wd.iterdir() if p.name.startswith("keyops-bundle-")]
+        self.assertEqual(leftover, [], "temp staging dir must be removed")
+        added = set(wd.iterdir()) - before
+        self.assertEqual({p.name for p in added}, {"out"}, "only the archive dir is new")
+
+    def test_archive_only_is_idempotent_across_runs(self) -> None:
+        cfg, wd = self._cfg("src_archive_rerun")
+        self._seed_wrapped(cfg, wd)
+        ns = self._ns(archive="out/wrap.tgz")
+        ek.cmd_bundle_create(ns, cfg, None)
+        # Second run must not raise "bundle dir already exists".
+        ek.cmd_bundle_create(ns, cfg, None)
+        self.assertTrue((wd / "out" / "wrap.tgz").is_file())
+
+    def test_archive_only_archive_extracts_to_valid_bundle(self) -> None:
+        cfg, wd = self._cfg("src_archive_extract")
+        self._seed_wrapped(cfg, wd)
+        ek.cmd_bundle_create(self._ns(archive="out/wrap.tgz"), cfg, None)
+
+        cfg2, wd2 = self._cfg("coord_archive_extract")
+        ns_x = ek.argparse.Namespace(
+            archive=str(wd / "out" / "wrap.tgz"),
+            bundle_dir="incoming/wrap",
+            install=False,
+            dry_run=False,
+        )
+        ek.cmd_bundle_extract(ns_x, cfg2, None)
+        root = ek._find_bundle_root(wd2 / "incoming" / "wrap")
+        self.assertTrue((root / "SHA256SUMS").is_file())
+        for s in (s["name"] for s in cfg2.all_services()):
+            self.assertTrue(
+                (root / "wrapped-shares" / s / "member1_eph_wrapped.share").is_file()
+            )
+
+    def test_no_bundle_dir_and_no_archive_errors(self) -> None:
+        cfg, wd = self._cfg("src_archive_none")
+        with self.assertRaises(SystemExit):
+            ek.cmd_bundle_create(self._ns(), cfg, None)
+
+
 if __name__ == "__main__":
     unittest.main()

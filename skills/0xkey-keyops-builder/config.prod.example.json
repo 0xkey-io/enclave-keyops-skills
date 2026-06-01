@@ -63,6 +63,7 @@
       "pivot_binary_name": "signer",
       "data_plane_health_path": "/health",
       "data_plane_post_path": "/v1/signer",
+      "$post_share_members_order_comment": "Order in which wrapped shares are installed during `ceremony post`. JSON array of member indices (e.g. [1, 2]) or a comma string (\"1,2\" / \"m1,m2\"); null falls back to the --post-global-order flag, then to [1, 2].",
       "post_share_members_order": null
     },
     {
@@ -77,6 +78,7 @@
       "pivot_binary_name": "policy-engine",
       "data_plane_health_path": "/health",
       "data_plane_post_path": "/v1/policy",
+      "$post_share_members_order_comment": "Order in which wrapped shares are installed during `ceremony post`. JSON array of member indices (e.g. [1, 2]) or a comma string (\"1,2\" / \"m1,m2\"); null falls back to the --post-global-order flag, then to [1, 2].",
       "post_share_members_order": null
     },
     {
@@ -91,6 +93,7 @@
       "pivot_binary_name": "notarizer",
       "data_plane_health_path": "/health",
       "data_plane_post_path": "/v1/notarizer",
+      "$post_share_members_order_comment": "Order in which wrapped shares are installed during `ceremony post`. JSON array of member indices (e.g. [1, 2]) or a comma string (\"1,2\" / \"m1,m2\"); null falls back to the --post-global-order flag, then to [1, 2].",
       "post_share_members_order": null
     },
     {
@@ -105,6 +108,7 @@
       "pivot_binary_name": "tls-fetcher",
       "data_plane_health_path": "/health",
       "data_plane_post_path": "/v1/fetcher",
+      "$post_share_members_order_comment": "Order in which wrapped shares are installed during `ceremony post`. JSON array of member indices (e.g. [1, 2]) or a comma string (\"1,2\" / \"m1,m2\"); null falls back to the --post-global-order flag, then to [1, 2].",
       "post_share_members_order": null
     },
     {
@@ -119,6 +123,7 @@
       "pivot_binary_name": "transaction-parser",
       "data_plane_health_path": "/health",
       "data_plane_post_path": "/v1/parser",
+      "$post_share_members_order_comment": "Order in which wrapped shares are installed during `ceremony post`. JSON array of member indices (e.g. [1, 2]) or a comma string (\"1,2\" / \"m1,m2\"); null falls back to the --post-global-order flag, then to [1, 2].",
       "post_share_members_order": null
     }
   ]
