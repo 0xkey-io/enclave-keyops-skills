@@ -1458,6 +1458,18 @@ def validate_current_round_approvals(mroot: Path, svc: Mapping[str, Any]) -> Non
         raise SystemExit(2)
 
 
+def approval_filename(alias: str, svc: Mapping[str, Any]) -> str:
+    """Build the qos_client approval filename for (alias, service).
+
+    Mirrors qos_client's `{alias}-{namespace}-{nonce}.approval` convention
+    (namespace slashes replaced with dashes). Used to name the share-set
+    approval that `ceremony reencrypt` produces, so the Coordinator can
+    select it later with `ceremony post --approval-alias <alias>`.
+    """
+    namespace, nonce = approval_context(svc)
+    return f"{alias}-{namespace}-{nonce}.approval"
+
+
 def approval_for(mroot: Path, svc: Mapping[str, Any], alias: str) -> Path:
     d = mroot / "approvals" / svc["name"]
     namespace, nonce = approval_context(svc)
@@ -1503,15 +1515,16 @@ def cmd_ceremony_reencrypt(ns: argparse.Namespace, cfg: Config, audit_log: Optio
     out_root = resolve_path(cfg.workdir, ns.wrapped_out_dir)
     ss_approvals_root = resolve_path(cfg.workdir, ns.share_set_approvals_dir)
     mid = ns.member_index
-    ap_alias = approval_alias(ns, cfg)
     for svc in cfg.all_services():
         envpath = mroot / f"{svc['name']}-manifest-envelope.json"
         adoc = att_root / f"{svc['name']}.cose"
-        approval = approval_for(mroot, svc, ap_alias)
+        # qos_client writes the Share Set Approval to --approval-path (it never
+        # reads it). Name it by the share-set alias + namespace + nonce so the
+        # Coordinator can later select it with `ceremony post --approval-alias
+        # <share-alias>`, and so it never collides with a manifest-set approval.
         ss_dir = ss_approvals_root / svc["name"]
         ss_dir.mkdir(parents=True, exist_ok=True)
-        staged = ss_dir / approval.name
-        shutil.copy2(approval, staged)
+        staged = ss_dir / approval_filename(ns.alias, svc)
         dest = out_root / svc["name"] / f"member{mid}_eph_wrapped.share"
         dest.parent.mkdir(parents=True, exist_ok=True)
         argv = [
@@ -2372,7 +2385,6 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--attest-dir", default="attestations")
     cr.add_argument("--wrapped-out-dir", default="wrapped-shares-out")
     cr.add_argument("--share-set-approvals-dir", default="share-set-approvals")
-    cr.add_argument("--approval-alias", default=None)
     cr.add_argument("--unsafe-skip-attestation", action="store_true")
     cr.add_argument(
         "--validation-time-override",
