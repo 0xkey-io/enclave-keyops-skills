@@ -433,6 +433,51 @@ away after typing the PIN.
 """
 
 
+PIVOT_ARGS_MANIFEST_NOTICE_HEADER = """\
+
+============================================================
+IMPORTANT: pivot args are part of the attested manifest
+============================================================
+Effective --pivot-args per service (these go verbatim into the manifest and
+are covered by attestation):
+"""
+
+PIVOT_ARGS_MANIFEST_NOTICE_FOOTER = """\
+Any env-specific value embedded above — e.g. the notarizer recipient pubkey or
+the signer / tls-fetcher email parameters — is part of the manifest. If ANY of
+these differ from what the live enclave was booted with, this is a manifest
+change, not a no-op, and it forces a FULL re-ceremony for every changed service:
+
+  1. Manifest set re-signs   — the old *.approval signed the OLD manifest and is
+     now invalid; you must re-collect approve-manifest from the manifest set.
+  2. Share set re-collaborates — the changed service must be re-booted
+     (`ceremony boot` / boot-standard); after boot the in-RAM quorum key is
+     gone, so share members must run proxy-re-encrypt-share + you must run
+     `ceremony post` to re-inject the existing quorum key.
+
+ACTION FOR THE AGENT: before distributing the review bundle, explicitly ask the
+operator to provide / confirm these env-specific pivot-arg values (notarizer
+recipient pubkey, signer + tls-fetcher email parameters). Do not assume the
+config defaults are correct for this environment.
+============================================================
+"""
+
+
+def print_pivot_args_manifest_notice(cfg: "Config") -> None:
+    """Surface the manifest-impact of pivot args before generate-manifest runs.
+
+    pivot args are baked into the attested manifest, so changing them (notably
+    the notarizer recipient pubkey and signer / tls-fetcher email parameters)
+    forces a full re-ceremony. We always print the effective args plus this
+    reminder so the agent prompts the operator to confirm env-specific values
+    rather than silently shipping config defaults. Advisory only — never blocks.
+    """
+    sys.stderr.write(PIVOT_ARGS_MANIFEST_NOTICE_HEADER)
+    for svc in cfg.all_services():
+        sys.stderr.write(f"  {svc['name']}: {_pivot_args_for_service(cfg, svc)}\n")
+    sys.stderr.write(PIVOT_ARGS_MANIFEST_NOTICE_FOOTER)
+
+
 def _run_ykman_capture(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["ykman", *args],
@@ -946,6 +991,8 @@ def cmd_manifest_generate(ns: argparse.Namespace, cfg: Config, audit_log: Option
 
     defs = cfg.raw["defaults"]
     bridge = str(defs["bridge_config_json"])
+
+    print_pivot_args_manifest_notice(cfg)
 
     for svc in cfg.all_services():
         pname = svc["pivot_binary_name"]

@@ -34,6 +34,7 @@
   "defaults": {
     "restart_policy": "always",
     "bridge_config_json": "[{\"type\":\"server\",\"port\":8081,\"host\":\"0.0.0.0\"}]",
+    "$pivot_args_comment": "pivot args are baked INTO the attested manifest. Any env-specific value here (notarizer recipient pubkey, signer/tls-fetcher email parameters) is part of the manifest hash — changing it vs the live enclave forces a FULL re-ceremony for that service: manifest-set re-approval + share-set re-boot-standard + proxy-re-encrypt-share + post-share. `manifest generate` prints the effective args and reminds the agent to make the operator confirm these before distributing the review bundle. Do NOT ship the placeholder defaults below to a real environment.",
     "pivot_args": "[--app-port,8081,--app-listen-host,127.0.0.1]",
     "tls_fetcher_pivot_args": "[--app-port,8081,--app-listen-host,127.0.0.1,--proxy-cid,3,--proxy-port,9004,--proxy-vsock-to-host,true]",
     "notarizer_pivot_args": null,

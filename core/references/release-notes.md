@@ -63,6 +63,16 @@ wrapped-shares bundle so it can never be silently dropped again.
   the historical `wrapped-shares-out` / `share-set-approvals` defaults), so
   overriding `reencrypt --wrapped-out-dir` / `--share-set-approvals-dir` without
   matching config can no longer silently misplace approvals — it fails loudly.
+- **`manifest generate` now prints a pivot-args manifest-impact reminder.**
+  pivot args are baked into the attested manifest, so an env-specific value such
+  as the notarizer recipient pubkey or the signer / tls-fetcher email parameters
+  is part of the manifest hash. Changing one forces a FULL re-ceremony for that
+  service (manifest-set re-approval + share-set re-boot-standard +
+  proxy-re-encrypt-share + post-share). `manifest generate` always echoes the
+  effective `--pivot-args` per service plus this consequence so the agent prompts
+  the operator to confirm these values before distributing the review bundle.
+  Advisory only — it never blocks the command. The example config gains a
+  `$pivot_args_comment` and `coordinator.md` documents the gate.
 
 ### Changed (potentially breaking)
 

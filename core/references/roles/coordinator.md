@@ -367,6 +367,28 @@ Before generating manifests, ensure:
   `manifest_nonce` to `0`. For subsequent ceremonies increment by 1.
 - `shared/patch-set/quorum_threshold` exists. If the patch-set is disabled,
   create the file with content `0`.
+- **env-specific pivot args are confirmed by the operator.** pivot args
+  (`defaults.{pivot_args,signer_pivot_args,tls_fetcher_pivot_args,notarizer_pivot_args}`)
+  are baked into the attested manifest. The values that vary per environment are
+  the **notarizer recipient pubkey** and the **signer + tls-fetcher email
+  parameters**. `manifest generate` prints the effective `--pivot-args` for every
+  service and a reminder block before it runs — read it, and explicitly ask the
+  operator to provide/confirm these values. Do not silently accept the config
+  placeholders.
+
+> **Why this matters — changing a pivot arg is never a no-op.** A pivot-arg
+> change = a manifest change = a new manifest hash, which forces a full
+> re-ceremony for every changed service:
+>
+> 1. **Manifest set re-signs.** The old `*.approval` signed the OLD manifest and
+>    is now invalid; re-collect `approve-manifest` from the manifest set.
+> 2. **Share set re-collaborates.** The changed service must be re-booted
+>    (`ceremony boot` / boot-standard). After boot the in-RAM quorum key is gone,
+>    so share members run `proxy-re-encrypt-share` and you run `ceremony post` to
+>    re-inject the existing quorum key.
+>
+> So when packaging these params, treat "did the operator confirm the
+> env-specific values?" as a hard gate before distributing the review bundle.
 
 Generate canonical manifests:
 
