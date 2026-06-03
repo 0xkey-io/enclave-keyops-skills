@@ -32,6 +32,48 @@ step before re-running ceremony commands.
 
 ---
 
+## 0.5.8 — 2026-06-04
+
+Hardening round: make the share-set approval a non-optional invariant of the
+wrapped-shares bundle so it can never be silently dropped again.
+
+### Fixed
+
+- **`bundle create --kind wrapped-shares` no longer ships without the share-set
+  approval.** Previously the approval copy was a silent `if dir exists` step:
+  if `share-set-approvals/` was missing, empty, or pointed elsewhere, the bundle
+  was built successfully with no approval and the failure only surfaced much
+  later as `expected exactly one approval ... found 0` on the Coordinator's
+  `ceremony post`. The packager now enforces the invariant *"every service with a
+  wrapped share must carry a matching (namespace + nonce) share-set approval"*
+  and hard-fails at create time, naming the offending service.
+
+### Added
+
+- **`bundle extract --install` validates the same invariant on the consumer
+  side** (defense in depth): a wrapped-shares bundle missing an approval, or
+  whose approvals disagree with the new `BUNDLE.json.share_set_approvals`
+  manifest, is rejected at install instead of at `ceremony post`.
+- **`BUNDLE.json` for wrapped-shares now records a `share_set_approvals`
+  manifest** (service → approval filenames) so the consumer can detect drops or
+  tampering in transit.
+- **Config single source of truth for Share-Set member I/O dirs.** New optional
+  `paths.wrapped_shares_out_dir` / `paths.share_set_approvals_dir`. `ceremony
+  reencrypt` and `bundle create`/`install` all resolve these from config (with
+  the historical `wrapped-shares-out` / `share-set-approvals` defaults), so
+  overriding `reencrypt --wrapped-out-dir` / `--share-set-approvals-dir` without
+  matching config can no longer silently misplace approvals — it fails loudly.
+
+### Changed (potentially breaking)
+
+- A wrapped-shares bundle built by keyops **< 0.5.8** (or any bundle lacking the
+  share-set approval) is now **rejected** by `bundle extract --install`. Rebuild
+  it with keyops >= 0.5.8 and resend. This is intentional: such a bundle would
+  have failed at `ceremony post` anyway, only later and with a more confusing
+  error.
+
+---
+
 ## 0.5.7 — 2026-06-02
 
 Role-feedback round after the v0.5.6 production Genesis (Coordinator + Share Set

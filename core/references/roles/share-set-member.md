@@ -472,6 +472,18 @@ shasum -a 256 "$WORKDIR/outbox/${ALIAS}-wrapped-shares-${STAMP}.tgz" \
   > "$WORKDIR/outbox/${ALIAS}-wrapped-shares-${STAMP}.tgz.sha256"
 ```
 
+> **Approval is mandatory, not optional.** `bundle create --kind wrapped-shares`
+> now **hard-fails** if any service has a wrapped share but no matching
+> share-set approval (correct namespace + nonce) under the approvals directory.
+> A missing approval used to be silently dropped and only surfaced much later as
+> `expected exactly one approval ... found 0` on the Coordinator's
+> `ceremony post`; it now stops here with the offending service named. If you
+> hit this error, re-run `ceremony reencrypt` (it writes the approvals) before
+> bundling. If you override `--share-set-approvals-dir` / `--wrapped-out-dir`,
+> set the matching `paths.share_set_approvals_dir` / `paths.wrapped_shares_out_dir`
+> in `config.json` so the packager looks in the same place — otherwise the
+> approval lands where the bundle never reads and the build fails by design.
+
 ## Output To User
 
 Tell the user to send only these files to the coordinator:

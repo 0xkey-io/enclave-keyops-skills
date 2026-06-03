@@ -25,7 +25,10 @@
     "manifest_set_dir": "manifest/manifest-set",
     "share_set_dir": "manifest/share-set",
     "patch_set_dir": "manifest/patch-set",
-    "member_roster_path": "shared/member-roster.json"
+    "member_roster_path": "shared/member-roster.json",
+    "$share_set_io_comment": "Optional Share-Set member dirs. `ceremony reencrypt` writes wrapped shares / share-set approvals here and `bundle create --kind wrapped-shares` reads them from here — single source of truth so the two never drift. Defaults shown; only set if you override reencrypt's --wrapped-out-dir / --share-set-approvals-dir.",
+    "wrapped_shares_out_dir": "wrapped-shares-out",
+    "share_set_approvals_dir": "share-set-approvals"
   },
 
   "defaults": {

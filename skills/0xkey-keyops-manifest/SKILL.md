@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-manifest
-version: 0.5.7
+version: 0.5.8
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Manifest Set member role:
   verifying a Coordinator-issued review bundle, signing one approve-manifest per
@@ -129,7 +129,7 @@ member to execute a `linux/amd64` release binary directly.
 
 ## Version & update
 
-This skill is version `0.5.7` (see the frontmatter at the top of this
+This skill is version `0.5.8` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any

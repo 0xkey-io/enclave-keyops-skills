@@ -1440,6 +1440,61 @@ def approval_context(svc: Mapping[str, Any]) -> Tuple[str, str]:
     return namespace, str(int(nonce))
 
 
+# Single source of truth for the two Share-Set member output directories.
+# `ceremony reencrypt` (producer) and `bundle create`/`bundle install`
+# (packager/consumer) MUST resolve these to the same place; otherwise a
+# share-set approval can be written somewhere the bundle never looks and the
+# wrapped-shares bundle ships without it. Both are optional config keys so
+# existing configs keep working with the historical defaults.
+WRAPPED_SHARES_OUT_DEFAULT = "wrapped-shares-out"
+SHARE_SET_APPROVALS_DEFAULT = "share-set-approvals"
+
+
+def wrapped_out_dir(cfg: "Config") -> str:
+    return cfg.paths().get("wrapped_shares_out_dir", WRAPPED_SHARES_OUT_DEFAULT)
+
+
+def share_set_approvals_dir(cfg: "Config") -> str:
+    return cfg.paths().get("share_set_approvals_dir", SHARE_SET_APPROVALS_DEFAULT)
+
+
+def has_matching_share_set_approval(ss_svc_dir: Path, svc: Mapping[str, Any]) -> bool:
+    """Whether a share-set approval matching svc's namespace+nonce exists.
+
+    Mirrors the matching rule used by `validate_current_round_approvals` /
+    `approval_for`: an approval counts only when its filename carries the
+    service namespace and ends with the current `-<nonce>`.
+    """
+    if not ss_svc_dir.is_dir():
+        return False
+    namespace, nonce = approval_context(svc)
+    for p in sorted(ss_svc_dir.glob("*.approval")):
+        if namespace in p.stem and p.stem.endswith(f"-{nonce}"):
+            return True
+    return False
+
+
+def require_share_set_approval(ss_root: Path, svc: Mapping[str, Any]) -> None:
+    """Fail loudly if a service with a wrapped share has no share-set approval.
+
+    This is the invariant that keeps a wrapped-shares bundle from silently
+    shipping without the approval `ceremony post` needs. Enforced on both the
+    producer (`create_bundle`) and consumer (`install_bundle`) sides.
+    """
+    namespace, nonce = approval_context(svc)
+    ss_svc_dir = ss_root / svc["name"]
+    if not has_matching_share_set_approval(ss_svc_dir, svc):
+        sys.stderr.write(
+            f"wrapped-shares bundle: service {svc['name']!r} has a wrapped share "
+            f"but no matching share-set approval in {ss_svc_dir} "
+            f"(expected *.approval with namespace={namespace} nonce={nonce}). "
+            f"Did `ceremony reencrypt` run for this service, or was "
+            f"--share-set-approvals-dir pointed elsewhere than config "
+            f"paths.share_set_approvals_dir?\n"
+        )
+        raise SystemExit(2)
+
+
 def validate_current_round_approvals(mroot: Path, svc: Mapping[str, Any]) -> None:
     d = mroot / "approvals" / svc["name"]
     namespace, nonce = approval_context(svc)
@@ -1513,8 +1568,10 @@ def cmd_ceremony_reencrypt(ns: argparse.Namespace, cfg: Config, audit_log: Optio
     pcr = resolve_path(cfg.workdir, cfg.paths()["pcr3_preimage_path"])
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     att_root = resolve_path(cfg.workdir, ns.attest_dir)
-    out_root = resolve_path(cfg.workdir, ns.wrapped_out_dir)
-    ss_approvals_root = resolve_path(cfg.workdir, ns.share_set_approvals_dir)
+    out_root = resolve_path(cfg.workdir, ns.wrapped_out_dir or wrapped_out_dir(cfg))
+    ss_approvals_root = resolve_path(
+        cfg.workdir, ns.share_set_approvals_dir or share_set_approvals_dir(cfg)
+    )
     mid = ns.member_index
     for svc in cfg.all_services():
         envpath = mroot / f"{svc['name']}-manifest-envelope.json"
@@ -1824,7 +1881,12 @@ def _roster_slice_for_kind(
     return {label: full.get(label, []) for label in sets}
 
 
-def write_bundle_meta(root: Path, kind: str, cfg: Config) -> None:
+def write_bundle_meta(
+    root: Path,
+    kind: str,
+    cfg: Config,
+    share_set_approvals: Optional[Dict[str, List[str]]] = None,
+) -> None:
     meta: Dict[str, Any] = {
         "kind": kind,
         "services": [s["name"] for s in cfg.all_services()],
@@ -1836,6 +1898,11 @@ def write_bundle_meta(root: Path, kind: str, cfg: Config) -> None:
     roster_slice = _roster_slice_for_kind(cfg, kind)
     if roster_slice is not None:
         meta["members"] = roster_slice
+    if share_set_approvals is not None:
+        # Manifest of the share-set approvals packaged per service. Lets the
+        # consumer (`bundle install`) verify nothing was dropped in transit and
+        # that every wrapped share has its approval.
+        meta["share_set_approvals"] = share_set_approvals
     (root / "BUNDLE.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
@@ -1844,6 +1911,7 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
         sys.stderr.write(f"bundle dir already exists: {root}\n")
         raise SystemExit(2)
     root.mkdir(parents=True)
+    share_set_approvals: Optional[Dict[str, List[str]]] = None
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     pcr = resolve_path(cfg.workdir, cfg.paths()["pcr3_preimage_path"])
     qkp = resolve_path(cfg.workdir, cfg.paths()["quorum_key_pub_path"])
@@ -1875,10 +1943,35 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
     elif kind == "approvals":
         copy_tree_contents(mroot / "approvals", root / "approvals")
     elif kind == "wrapped-shares":
-        copy_tree_contents(resolve_path(cfg.workdir, "wrapped-shares-out"), root / "wrapped-shares")
-        ss_approvals = resolve_path(cfg.workdir, "share-set-approvals")
-        if ss_approvals.is_dir():
-            copy_tree_contents(ss_approvals, root / "approvals")
+        wrapped_src = resolve_path(cfg.workdir, wrapped_out_dir(cfg))
+        copy_tree_contents(wrapped_src, root / "wrapped-shares")
+        ss_root = resolve_path(cfg.workdir, share_set_approvals_dir(cfg))
+        # Invariant: every service that has a wrapped share MUST ship a matching
+        # share-set approval. Enforcing it here (the earliest point) instead of
+        # leaving the copy optional is what stops the bundle from silently
+        # omitting approvals and failing far later on the Coordinator's
+        # `ceremony post` with "expected exactly one approval ... found 0".
+        svc_by_name = {s["name"]: s for s in cfg.all_services()}
+        wrapped_dst = root / "wrapped-shares"
+        services_with_shares = sorted(
+            d.name
+            for d in wrapped_dst.iterdir()
+            if d.is_dir() and d.name in svc_by_name
+        ) if wrapped_dst.is_dir() else []
+        if not services_with_shares:
+            sys.stderr.write(
+                f"wrapped-shares bundle: no per-service wrapped shares found under "
+                f"{wrapped_src}; did `ceremony reencrypt` run?\n"
+            )
+            raise SystemExit(2)
+        share_set_approvals = {}
+        for name in services_with_shares:
+            svc = svc_by_name[name]
+            require_share_set_approval(ss_root, svc)
+            copy_tree_contents(ss_root / name, root / "approvals" / name)
+            share_set_approvals[name] = sorted(
+                p.name for p in (root / "approvals" / name).glob("*.approval")
+            )
     elif kind == "genesis-output":
         # Genesis-output bundle is built on the Coordinator after `ceremony
         # genesis-boot` and shipped to every Share Set member so they can run
@@ -1905,7 +1998,7 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
         )
         if roster_path.is_file():
             copy_file(roster_path, root / "member-roster.json")
-    write_bundle_meta(root, kind, cfg)
+    write_bundle_meta(root, kind, cfg, share_set_approvals=share_set_approvals)
     write_sha256sums(root)
 
 
@@ -2189,13 +2282,47 @@ def install_bundle(bundle_root: Path, cfg: Config) -> None:
         # `ceremony post` reads from --wrapped-in-dir (default
         # "wrapped-shares-coordinator"); the Coordinator merges each
         # member's wrapped shares into wrapped-shares-coordinator/<service>/.
+        #
+        # Defense in depth: enforce the same invariant the producer does — every
+        # service with a wrapped share must carry a share-set approval. This
+        # catches bundles built by an older/buggy producer (or trimmed in
+        # transit) at install time instead of at `ceremony post`.
+        wrapped_root = bundle_root / "wrapped-shares"
+        approvals_root = bundle_root / "approvals"
+        services_with_shares = sorted(
+            d.name for d in wrapped_root.iterdir() if d.is_dir()
+        ) if wrapped_root.is_dir() else []
+        manifest = meta.get("share_set_approvals")
+        for svc_name in services_with_shares:
+            svc_approval_dir = approvals_root / svc_name
+            on_disk = sorted(
+                p.name for p in svc_approval_dir.glob("*.approval")
+            ) if svc_approval_dir.is_dir() else []
+            if not on_disk:
+                sys.stderr.write(
+                    f"wrapped-shares bundle: service {svc_name!r} has a wrapped "
+                    f"share but no share-set approval under {svc_approval_dir}. "
+                    f"Re-build the bundle with keyops >= 0.5.8 "
+                    f"(`bundle create --kind wrapped-shares`).\n"
+                )
+                raise SystemExit(2)
+            if manifest is not None:
+                expected = sorted(manifest.get(svc_name, []))
+                if on_disk != expected:
+                    sys.stderr.write(
+                        f"wrapped-shares bundle: service {svc_name!r} share-set "
+                        f"approvals do not match BUNDLE.json manifest "
+                        f"(expected {expected}, found {on_disk}); bundle may be "
+                        f"corrupt or tampered.\n"
+                    )
+                    raise SystemExit(2)
         _install_tree(
-            bundle_root / "wrapped-shares",
+            wrapped_root,
             resolve_path(cfg.workdir, "wrapped-shares-coordinator"),
         )
-        if (bundle_root / "approvals").is_dir():
+        if approvals_root.is_dir():
             mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
-            _install_tree(bundle_root / "approvals", mroot / "approvals")
+            _install_tree(approvals_root, mroot / "approvals")
     else:
         sys.stderr.write(
             f"bundle install: unsupported kind {kind!r}; extract-only.\n"
@@ -2408,8 +2535,21 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--share-path", required=True)
     cr.add_argument("--member-index", type=int, required=True)
     cr.add_argument("--attest-dir", default="attestations")
-    cr.add_argument("--wrapped-out-dir", default="wrapped-shares-out")
-    cr.add_argument("--share-set-approvals-dir", default="share-set-approvals")
+    cr.add_argument(
+        "--wrapped-out-dir",
+        default=None,
+        help="where to write wrapped shares; defaults to config "
+        "paths.wrapped_shares_out_dir (or 'wrapped-shares-out'). Keep it in "
+        "sync with the bundle packager — overriding it without matching config "
+        "makes `bundle create --kind wrapped-shares` look in the wrong place.",
+    )
+    cr.add_argument(
+        "--share-set-approvals-dir",
+        default=None,
+        help="where to write share-set approvals; defaults to config "
+        "paths.share_set_approvals_dir (or 'share-set-approvals'). Keep it in "
+        "sync with the bundle packager.",
+    )
     cr.add_argument(
         "--unsafe-skip-attestation",
         action="store_true",
