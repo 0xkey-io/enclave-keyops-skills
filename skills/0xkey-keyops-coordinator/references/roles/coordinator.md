@@ -367,6 +367,28 @@ Before generating manifests, ensure:
   `manifest_nonce` to `0`. For subsequent ceremonies increment by 1.
 - `shared/patch-set/quorum_threshold` exists. If the patch-set is disabled,
   create the file with content `0`.
+- **env-specific pivot args are confirmed by the operator.** pivot args
+  (`defaults.{pivot_args,signer_pivot_args,tls_fetcher_pivot_args,notarizer_pivot_args}`)
+  are baked into the attested manifest. The values that vary per environment are
+  the **notarizer recipient pubkey** and the **signer + tls-fetcher email
+  parameters**. `manifest generate` prints the effective `--pivot-args` for every
+  service and a reminder block before it runs — read it, and explicitly ask the
+  operator to provide/confirm these values. Do not silently accept the config
+  placeholders.
+
+> **Why this matters — changing a pivot arg is never a no-op.** A pivot-arg
+> change = a manifest change = a new manifest hash, which forces a full
+> re-ceremony for every changed service:
+>
+> 1. **Manifest set re-signs.** The old `*.approval` signed the OLD manifest and
+>    is now invalid; re-collect `approve-manifest` from the manifest set.
+> 2. **Share set re-collaborates.** The changed service must be re-booted
+>    (`ceremony boot` / boot-standard). After boot the in-RAM quorum key is gone,
+>    so share members run `proxy-re-encrypt-share` and you run `ceremony post` to
+>    re-inject the existing quorum key.
+>
+> So when packaging these params, treat "did the operator confirm the
+> env-specific values?" as a hard gate before distributing the review bundle.
 
 Generate canonical manifests:
 
@@ -401,6 +423,19 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   manifest envelope
 ```
 
+> **The manifest envelope is immutable after this step.** `manifest envelope`
+> writes each `<svc>-manifest-envelope.json` AND a read-only snapshot under
+> `manifest/original/<svc>-manifest-envelope.json`. The envelope (manifest +
+> manifest-set approvals) is the ONLY artifact `boot-standard` may consume —
+> **never hand-edit it**. In particular, do NOT inject `shareSetApprovals` into
+> the envelope JSON: share-set approvals are delivered separately and posted via
+> `ceremony post`, and a mutated envelope is rejected by the enclave as the
+> opaque `ProtocolMsgDeserialization`. `ceremony boot`, `ceremony attestation`,
+> and `bundle create --kind share-request` now compare the working envelope
+> against the immutable snapshot and **fail loud** on any drift. If you ever need
+> to recover the canonical file, restore it from the snapshot:
+> `cp manifest/original/<svc>-manifest-envelope.json <svc>-manifest-envelope.json`.
+
 Render/apply K8s:
 
 ```bash
@@ -409,6 +444,35 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" deploy render
 # After user approval:
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" deploy apply
 ```
+
+### Phase 7-9: boot → post-share is ONE atomic window
+
+`boot-standard → attestation → share-request → wrapped-shares → post-share` is a
+single uninterruptible window per service. The enclave generates a fresh
+**ephemeral key** during `attestation`; every wrapped share members return is
+encrypted to *that* key. Anything that destroys the ephemeral key (Pod
+delete/recreate) silently invalidates all wrapped shares already collected, and
+`ceremony post` then fails with `DecryptionFailed` → `UnrecoverableError`.
+
+Hard rules for the duration of this window:
+
+- **Do NOT delete or recreate Pods.** Container restarts / crash-loops are safe
+  (apps will crash-loop 30+ times because the quorum key is not provisioned yet —
+  this is expected). A Pod `delete`/`replace`/`rollout restart` is NOT — it
+  regenerates the ephemeral key and burns every wrapped share for that service.
+- **Do NOT run a "test" / probe `ceremony post`.** There is no safe dry-run for
+  post-share (see below). A speculative post with the wrong/old wrapped share can
+  push the service into `DecryptionFailed` → `UnrecoverableError`.
+- **Do NOT reuse wrapped shares from a previous attestation round.** A new
+  `ceremony attestation` ⇒ a new ephemeral key ⇒ all earlier wrapped shares are
+  dead. Re-issue the share-request and collect fresh wrapped shares.
+- **Do NOT re-`manifest envelope` mid-window** unless you intend to restart the
+  whole window — it can change the envelope and force a full re-ceremony.
+
+If the window is broken (Pod recreated, expired certs, wrong shares), do not try
+to patch forward. Restart cleanly from `ceremony attestation`: re-attest → new
+share-request bundle → members reencrypt → collect fresh wrapped shares →
+`ceremony post`.
 
 ### Network Topology
 
@@ -459,6 +523,14 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
 `bundle extract --install` automatically places wrapped shares into
 `wrapped-shares-coordinator/<service>/` and merges the share-set approvals into
 `manifest/approvals/<service>/`.
+
+> **`ceremony post` has no safe test mode.** There is no dry-run, no probe, no
+> "just try it and see" for post-share. The only safe pre-flight is **offline
+> validation** of the inputs (the checklist below). Once you run `ceremony post`,
+> the wrapped share is decrypted inside the enclave; if it is the wrong share or
+> the ephemeral key has rotated, the result is `DecryptionFailed` and the service
+> can land in `UnrecoverableError`. Treat the offline checklist as the gate — do
+> not substitute a speculative post for it.
 
 Post-share pre-flight checklist (verify before running `ceremony post`):
 
@@ -523,15 +595,98 @@ those containers may be minimal images without shell tooling. Use the skill
 outside the containers, or use an explicit jumpbox / local port-forward fallback
 with equivalent HTTP checks.
 
-## Troubleshooting
+## Single-service recovery
 
-| Error | Cause | Resolution |
-|---|---|---|
-| `ProtocolErrorResponse(DecryptionFailed)` on `ceremony post` | Pod was deleted/recreated after attestation; ephemeral key destroyed | Redo: `ceremony attestation` → new share-request bundle → Share members reencrypt → collect wrapped-shares bundles → `ceremony post` |
-| `NotShareSetMember` on `ceremony post` | `--approval-alias` is a manifest-set alias; enclave checks shareSet membership | Use the share-set alias (e.g. `share-torben`) for `--approval-alias` |
-| `expected exactly one approval ... found 0` for share-set alias | The wrapped-shares bundle did not carry the member's share-set approval (older keyops, or `--approval-alias` does not match the member's `--alias`) | Confirm the bundle was built with keyops >= 0.5.6; the share-set approval is named `<member-alias>-<namespace>-<nonce>.approval`. Use that member alias for `--approval-alias` |
-| `InvalidCertChain(CertExpired)` on `ceremony share-extract` | genesis_attestation_doc leaf cert expired (3-hour validity window) | Ask Share members to add `--validation-time-override <genesis-boot-UTC-timestamp>` to `ceremony share-extract` |
-| `Connection Failed / connection timed out` on ceremony commands | Using `--resolve-pod-ip` from outside the cluster network | Switch to `host_ip` + `kubectl port-forward` (see Network Topology section) |
+Any one of the five services (`signer`, `policy-engine`, `notarizer`,
+`tls-fetcher`, `transaction-parser`) can fail on its own — its Pod gets
+recreated, its attestation cert expires, or a bad post pushes it into
+`UnrecoverableError` — while the other four stay healthy and provisioned. There
+is nothing signer-specific about this; the runbook below is the same for every
+service.
+
+> **Why you must NOT just re-run the full ceremony.** `ceremony boot` /
+> `attestation` / `post` / `verify` default to all five services. Re-running them
+> unscoped re-boots the four HEALTHY services too, and `boot-standard` wipes the
+> in-RAM quorum key of an already-provisioned service — turning a one-service
+> incident into a five-service outage. Always scope recovery with `--service`.
+
+Every provisioning command takes a repeatable `--service <name>` selector
+(omitting it keeps the all-five default). Recover one service like this (example
+uses `signer`; substitute any service name):
+
+1. **Reuse the existing manifest envelope — do NOT re-run `manifest generate` /
+   `manifest envelope`.** A single-service recovery does not change the manifest,
+   so the immutable `manifest/original/<svc>-manifest-envelope.json` from the
+   original ceremony is still valid and is what every step below consumes.
+2. **Rebuild the Pod** for that service only (your infra/overlay step), and wait
+   until `/qos/enclave-health` reports `WaitingForBootInstruction`.
+3. **Boot just that service:**
+
+```bash
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  ceremony boot --service signer --resolve-pod-ip
+```
+
+4. **Re-attest just that service** (this mints a fresh ephemeral key for it):
+
+```bash
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  ceremony attestation --service signer --resolve-pod-ip
+```
+
+5. **Build a single-service share-request bundle** and ship it to Share members:
+
+```bash
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  bundle create --kind share-request --service signer \
+  --bundle-dir "bundles/share-request-signer-${STAMP}" \
+  --archive "bundles/share-request-signer-${STAMP}.tgz"
+```
+
+   The bundle's `BUNDLE.json.services` records only `signer`, so members'
+   `ceremony reencrypt --service signer` and your `bundle extract --install`
+   operate on exactly that one service.
+6. **Members reencrypt for that service only** (`ceremony reencrypt --service
+   signer ...`) and return wrapped-shares bundles, exactly as in the full flow.
+7. **Install and post just that service:**
+
+```bash
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  bundle extract --install --archive "inbox/<member>-wrapped-shares-<stamp>.tgz"
+
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  ceremony post --service signer --resolve-pod-ip \
+  --approval-alias "$APPROVAL_ALIAS" --post-global-order "$POST_ORDER"
+```
+
+8. **Verify just that service:**
+
+```bash
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  verify --service signer
+```
+
+The same atomic-window rules apply within a single-service recovery: between its
+boot and its post-share, do not delete that Pod again and do not reuse wrapped
+shares from a previous attestation round.
+
+## Troubleshooting decision tree
+
+Read each row as: **cause → what NOT to do → next safe step.** The "Do NOT"
+column is the important one — most of these failures get worse, not better, when
+you improvise a retry.
+
+| Error | Cause | Do NOT | Next safe step |
+|---|---|---|---|
+| `ProtocolErrorResponse(DecryptionFailed)` on `ceremony post` | Pod was deleted/recreated after attestation; ephemeral key destroyed, so wrapped shares no longer decrypt | Do not retry `ceremony post`, do not delete the Pod again, do not reuse the old wrapped shares | Restart the atomic window: `ceremony attestation` → new share-request bundle → members reencrypt → collect fresh wrapped-shares → `ceremony post` |
+| `UnrecoverableError` (from `/qos/enclave-health` or a failed post) | A bad/old wrapped share was posted, or post ran against a rotated ephemeral key; the service is in a terminal boot state | Do not keep posting; do not assume it will self-heal | The service must be re-booted: re-run `boot-standard` for that service (single-service recovery), then re-do attestation → share-request → reencrypt → post |
+| `ProtocolMsgDeserialization` on `ceremony boot` / `ceremony attestation` | The manifest envelope was hand-edited after `manifest envelope` generated it (commonly `shareSetApprovals` injected into the envelope JSON) | Do not boot from the edited envelope; do not add share-set approvals to the envelope by hand | Restore the canonical envelope from the immutable snapshot: `cp manifest/original/<svc>-manifest-envelope.json <svc>-manifest-envelope.json`, then re-run boot. keyops >= 0.5.8 fails loud on this drift before it reaches the enclave |
+| `NotShareSetMember` on `ceremony post` | `--approval-alias` is a manifest-set alias; enclave checks shareSet membership | Do not pass a manifest-set alias (e.g. `manifest-torben`) | Use the share-set alias (e.g. `share-torben`) for `--approval-alias` |
+| `expected exactly one approval ... found 0` for share-set alias | The wrapped-shares bundle did not carry the member's share-set approval (older keyops, or `--approval-alias` does not match the member's `--alias`) | Do not hand-craft a missing approval; do not guess another alias | keyops >= 0.5.8 hard-fails this both at the member's `bundle create --kind wrapped-shares` and at your `bundle extract --install`. If you still hit it, the bundle was built by an older keyops — ask the member to rebuild with keyops >= 0.5.8. The approval is named `<member-alias>-<namespace>-<nonce>.approval`; use that member alias for `--approval-alias` |
+| `wrapped-shares bundle: service '<svc>' has a wrapped share but no share-set approval` on `bundle extract --install` | Bundle was produced without the required share-set approval (old keyops or trimmed in transit) | Do not post the partial bundle | Ask the member to rebuild the wrapped-shares bundle with keyops >= 0.5.8 (enforces the approval invariant at create time) and resend |
+| `InvalidCertChain(CertExpired)` on `ceremony share-extract` | genesis_attestation_doc leaf cert expired (3-hour validity window) | Do not skip attestation blindly | Ask Share members to add `--validation-time-override <genesis-boot-UTC-timestamp>` to `ceremony share-extract` |
+| `Connection Failed / connection timed out` on ceremony commands | Using `--resolve-pod-ip` from outside the cluster network | Do not keep retrying with `--resolve-pod-ip` | Switch to `host_ip` + `kubectl port-forward` (see Network Topology section) |
 
 ## Output To User
 

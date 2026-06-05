@@ -45,6 +45,20 @@ def _touch(path: Path, content: str = "x") -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _set_nonce0(cfg) -> None:
+    """share-set approval matching needs a non-null manifest_nonce; the example
+    config ships null on purpose, so tests that exercise the wrapped-shares
+    invariant pin nonce=0 (mutates the shared service dicts in cfg.raw)."""
+    for svc in cfg.all_services():
+        svc["manifest_nonce"] = 0
+
+
+def _approval_name(svc_name: str, nonce: int = 0) -> str:
+    """qos_client approval filename: {alias}-{namespace}-{nonce}.approval, with
+    namespace slashes replaced by dashes. Example config uses 0xkey/<svc>."""
+    return f"share-alice-0xkey-{svc_name}-{nonce}.approval"
+
+
 class InstallRoundTripTests(unittest.TestCase):
     def setUp(self) -> None:
         self._ctx = tempfile.TemporaryDirectory()
@@ -165,17 +179,69 @@ class InstallRoundTripTests(unittest.TestCase):
         self.assertTrue((wd2 / p2["manifest_set_dir"] / "alice.pub").is_file())
         self.assertTrue((wd2 / p2["pcr3_preimage_path"]).is_file())
 
+    def test_share_request_scoped_to_single_service(self) -> None:
+        cfg, wd = self._cfg("src_req_scoped")
+        p = cfg.paths()
+        mroot = wd / p["workdir_manifest_subdir"]
+        svcs = self._services(cfg)
+        for s in svcs:
+            _touch(mroot / f"{s}-manifest-envelope.json", f"env-{s}")
+            _touch(wd / "attestations" / f"{s}.cose", f"cose-{s}")
+            _touch(mroot / "approvals" / s / "alice.approval", f"appr-{s}")
+        _touch(wd / p["manifest_set_dir"] / "alice.pub")
+        _touch(wd / p["pcr3_preimage_path"])
+        _touch(wd / p["member_roster_path"], "{}")
+
+        broot = wd / "outbox" / "req-signer"
+        ek.create_bundle(broot, "share-request", cfg, services=["signer"])
+
+        # only the scoped service is packaged
+        self.assertTrue((broot / "signer-manifest-envelope.json").is_file())
+        for s in svcs:
+            if s == "signer":
+                continue
+            self.assertFalse(
+                (broot / f"{s}-manifest-envelope.json").is_file(),
+                f"{s} must NOT be in a signer-scoped bundle",
+            )
+        # BUNDLE.json records only the scoped subset so reencrypt/install agree
+        meta = json.loads((broot / "BUNDLE.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta["services"], ["signer"])
+        self.assertEqual(list(meta["manifest_namespaces"]), ["signer"])
+
+        # install on the member side only distributes the scoped service
+        cfg2, wd2 = self._cfg("member_req_scoped")
+        ek.install_bundle(broot, cfg2)
+        mroot2 = wd2 / cfg2.paths()["workdir_manifest_subdir"]
+        self.assertTrue((mroot2 / "signer-manifest-envelope.json").is_file())
+        self.assertFalse((mroot2 / "notarizer-manifest-envelope.json").exists())
+
+    def test_share_request_unknown_service_errors(self) -> None:
+        cfg, wd = self._cfg("src_req_badsvc")
+        broot = wd / "outbox" / "req-bad"
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(broot, "share-request", cfg, services=["nope"])
+
+    def test_service_selector_rejected_for_non_share_request(self) -> None:
+        cfg, wd = self._cfg("src_req_wrongkind")
+        broot = wd / "outbox" / "req-wrongkind"
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(broot, "review", cfg, services=["signer"])
+
     # ----- wrapped-shares ----------------------------------------------------
     def test_wrapped_shares_round_trip_matches_post_reads(self) -> None:
         cfg, wd = self._cfg("src_wrap")
+        _set_nonce0(cfg)
         svcs = self._services(cfg)
         for s in svcs:
             _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+            _touch(wd / "share-set-approvals" / s / _approval_name(s))
 
         broot = wd / "outbox" / "wrap"
         ek.create_bundle(broot, "wrapped-shares", cfg)
 
         cfg2, wd2 = self._cfg("coord_wrap")
+        _set_nonce0(cfg2)
         ek.install_bundle(broot, cfg2)
 
         # ceremony post default --wrapped-in-dir is "wrapped-shares-coordinator".
@@ -189,10 +255,11 @@ class InstallRoundTripTests(unittest.TestCase):
         """share-set-approvals/ should be packaged into the wrapped-shares
         bundle and installed into the Coordinator's manifest/approvals/."""
         cfg, wd = self._cfg("src_wrap_appr")
+        _set_nonce0(cfg)
         svcs = self._services(cfg)
         for s in svcs:
             _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
-            _touch(wd / "share-set-approvals" / s / f"share-alice-0xkey-{s}-0.approval")
+            _touch(wd / "share-set-approvals" / s / _approval_name(s))
 
         broot = wd / "outbox" / "wrap_appr"
         ek.create_bundle(broot, "wrapped-shares", cfg)
@@ -200,11 +267,18 @@ class InstallRoundTripTests(unittest.TestCase):
         # Verify bundle contains approvals/ alongside wrapped-shares/
         for s in svcs:
             self.assertTrue(
-                (broot / "approvals" / s / f"share-alice-0xkey-{s}-0.approval").is_file(),
+                (broot / "approvals" / s / _approval_name(s)).is_file(),
                 f"bundle must contain share-set approval for {s}",
             )
 
+        # BUNDLE.json must carry the share_set_approvals manifest.
+        meta = json.loads((broot / "BUNDLE.json").read_text(encoding="utf-8"))
+        self.assertIn("share_set_approvals", meta)
+        for s in svcs:
+            self.assertEqual(meta["share_set_approvals"][s], [_approval_name(s)])
+
         cfg2, wd2 = self._cfg("coord_wrap_appr")
+        _set_nonce0(cfg2)
         ek.install_bundle(broot, cfg2)
         mroot2 = wd2 / cfg2.paths()["workdir_manifest_subdir"]
         for s in svcs:
@@ -213,29 +287,8 @@ class InstallRoundTripTests(unittest.TestCase):
                 f"wrapped share for {s} must land in wrapped-shares-coordinator",
             )
             self.assertTrue(
-                (mroot2 / "approvals" / s / f"share-alice-0xkey-{s}-0.approval").is_file(),
+                (mroot2 / "approvals" / s / _approval_name(s)).is_file(),
                 f"share-set approval for {s} must land in Coordinator approvals",
-            )
-
-    def test_wrapped_shares_backward_compat_no_approvals(self) -> None:
-        """Bundles created before the share-set-approvals feature (no
-        approvals/ dir) must still install without errors."""
-        cfg, wd = self._cfg("src_wrap_old")
-        svcs = self._services(cfg)
-        for s in svcs:
-            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
-        # No share-set-approvals/ directory
-
-        broot = wd / "outbox" / "wrap_old"
-        ek.create_bundle(broot, "wrapped-shares", cfg)
-        self.assertFalse((broot / "approvals").exists(),
-                         "bundle without share-set-approvals should have no approvals dir")
-
-        cfg2, wd2 = self._cfg("coord_wrap_old")
-        ek.install_bundle(broot, cfg2)
-        for s in svcs:
-            self.assertTrue(
-                (wd2 / "wrapped-shares-coordinator" / s / "member1_eph_wrapped.share").is_file(),
             )
 
     # ----- approvals ---------------------------------------------------------
@@ -432,8 +485,10 @@ class BundleCreateArchiveTests(unittest.TestCase):
         return ek.argparse.Namespace(**defaults)
 
     def _seed_wrapped(self, cfg, wd) -> None:
+        _set_nonce0(cfg)
         for s in (s["name"] for s in cfg.all_services()):
             _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+            _touch(wd / "share-set-approvals" / s / _approval_name(s))
 
     def test_archive_only_packs_and_cleans_temp_dir(self) -> None:
         cfg, wd = self._cfg("src_archive_only")
@@ -483,6 +538,179 @@ class BundleCreateArchiveTests(unittest.TestCase):
         cfg, wd = self._cfg("src_archive_none")
         with self.assertRaises(SystemExit):
             ek.cmd_bundle_create(self._ns(), cfg, None)
+
+    def test_extract_no_bundle_dir_no_install_errors(self) -> None:
+        cfg, wd = self._cfg("src_extract_guard")
+        self._seed_wrapped(cfg, wd)
+        ek.cmd_bundle_create(self._ns(archive="out/wrap.tgz"), cfg, None)
+        cfg2, wd2 = self._cfg("coord_extract_guard")
+        ns_x = ek.argparse.Namespace(
+            archive=str(wd / "out" / "wrap.tgz"),
+            bundle_dir=None,
+            install=False,
+            dry_run=False,
+        )
+        with self.assertRaises(SystemExit):
+            ek.cmd_bundle_extract(ns_x, cfg2, None)
+
+    def test_extract_install_without_bundle_dir_cleans_temp(self) -> None:
+        cfg, wd = self._cfg("src_extract_install")
+        self._seed_wrapped(cfg, wd)
+        ek.cmd_bundle_create(self._ns(archive="out/wrap.tgz"), cfg, None)
+
+        cfg2, wd2 = self._cfg("coord_extract_install")
+        before = set(wd2.iterdir())
+        ns_x = ek.argparse.Namespace(
+            archive=str(wd / "out" / "wrap.tgz"),
+            bundle_dir=None,
+            install=True,
+            dry_run=False,
+        )
+        ek.cmd_bundle_extract(ns_x, cfg2, None)
+        # the throwaway staging dir must not survive
+        leftover = [p for p in wd2.iterdir() if p.name.startswith("keyops-extract-")]
+        self.assertEqual(leftover, [], "temp extract dir must be removed")
+        # install actually distributed the wrapped shares
+        for s in (s["name"] for s in cfg2.all_services()):
+            self.assertTrue(
+                (wd2 / "wrapped-shares-coordinator" / s / "member1_eph_wrapped.share").is_file()
+            )
+        self.assertNotIn("incoming", {p.name for p in set(wd2.iterdir()) - before})
+
+
+class WrappedSharesApprovalInvariantTests(unittest.TestCase):
+    """The wrapped-shares bundle must never silently ship without the share-set
+    approval `ceremony post` needs. Enforced on producer (create_bundle) and
+    consumer (install_bundle) sides."""
+
+    def setUp(self) -> None:
+        self._ctx = tempfile.TemporaryDirectory()
+        self.base = Path(self._ctx.name).resolve()
+
+    def tearDown(self) -> None:
+        self._ctx.cleanup()
+
+    def _cfg(self, name: str, raw: dict | None = None):
+        wd = self.base / name
+        wd.mkdir(parents=True, exist_ok=True)
+        return ek.Config(raw or _base_raw(), workdir=wd), wd
+
+    def _services(self, cfg) -> list[str]:
+        return [s["name"] for s in cfg.all_services()]
+
+    # ----- producer side (create_bundle) ------------------------------------
+    def test_missing_all_approvals_errors(self) -> None:
+        cfg, wd = self._cfg("no_appr")
+        _set_nonce0(cfg)
+        for s in self._services(cfg):
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+        # No share-set-approvals/ at all.
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(wd / "outbox" / "b", "wrapped-shares", cfg)
+
+    def test_one_service_missing_approval_errors(self) -> None:
+        cfg, wd = self._cfg("one_missing")
+        _set_nonce0(cfg)
+        svcs = self._services(cfg)
+        for s in svcs:
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+            _touch(wd / "share-set-approvals" / s / _approval_name(s))
+        # Drop exactly one service's approval.
+        (wd / "share-set-approvals" / svcs[2] / _approval_name(svcs[2])).unlink()
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(wd / "outbox" / "b", "wrapped-shares", cfg)
+
+    def test_nonce_mismatch_approval_errors(self) -> None:
+        """A stale approval from a previous round (wrong nonce) must not satisfy
+        the invariant."""
+        cfg, wd = self._cfg("stale_nonce")
+        _set_nonce0(cfg)
+        for s in self._services(cfg):
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+            # nonce 0 expected, seed nonce 9.
+            _touch(wd / "share-set-approvals" / s / _approval_name(s, nonce=9))
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(wd / "outbox" / "b", "wrapped-shares", cfg)
+
+    def test_no_wrapped_shares_errors(self) -> None:
+        cfg, wd = self._cfg("no_wrapped")
+        _set_nonce0(cfg)
+        (wd / "wrapped-shares-out").mkdir(parents=True, exist_ok=True)
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(wd / "outbox" / "b", "wrapped-shares", cfg)
+
+    # ----- B: path drift via config single-source-of-truth ------------------
+    def test_custom_approvals_dir_from_config(self) -> None:
+        """create_bundle must read paths.share_set_approvals_dir /
+        wrapped_shares_out_dir so it stays aligned with reencrypt."""
+        raw = _base_raw()
+        raw["paths"]["wrapped_shares_out_dir"] = "custom-wrapped"
+        raw["paths"]["share_set_approvals_dir"] = "custom-approvals"
+        cfg, wd = self._cfg("custom_dirs", raw)
+        _set_nonce0(cfg)
+        svcs = self._services(cfg)
+        for s in svcs:
+            _touch(wd / "custom-wrapped" / s / "member1_eph_wrapped.share")
+            _touch(wd / "custom-approvals" / s / _approval_name(s))
+        broot = wd / "outbox" / "b"
+        ek.create_bundle(broot, "wrapped-shares", cfg)
+        for s in svcs:
+            self.assertTrue((broot / "approvals" / s / _approval_name(s)).is_file())
+
+    def test_drift_when_only_reencrypt_dir_changes(self) -> None:
+        """If approvals were written to a non-default dir but config still points
+        at the default, create_bundle must fail loudly (not silently omit)."""
+        cfg, wd = self._cfg("drift")
+        _set_nonce0(cfg)
+        for s in self._services(cfg):
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+            # Approvals landed somewhere config does not know about.
+            _touch(wd / "elsewhere" / s / _approval_name(s))
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(wd / "outbox" / "b", "wrapped-shares", cfg)
+
+    # ----- consumer side (install_bundle) -----------------------------------
+    def test_install_rejects_bundle_missing_approval(self) -> None:
+        """A wrapped-shares bundle hand-trimmed to drop an approval must be
+        rejected at install time (defense in depth)."""
+        cfg, wd = self._cfg("src_trim")
+        _set_nonce0(cfg)
+        svcs = self._services(cfg)
+        for s in svcs:
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+            _touch(wd / "share-set-approvals" / s / _approval_name(s))
+        broot = wd / "outbox" / "b"
+        ek.create_bundle(broot, "wrapped-shares", cfg)
+
+        # Trim one service's approval out of the built bundle.
+        victim = svcs[1]
+        (broot / "approvals" / victim / _approval_name(victim)).unlink()
+
+        cfg2, wd2 = self._cfg("coord_trim")
+        _set_nonce0(cfg2)
+        with self.assertRaises(SystemExit):
+            ek.install_bundle(broot, cfg2)
+
+    def test_install_rejects_manifest_mismatch(self) -> None:
+        """If on-disk approvals diverge from BUNDLE.json.share_set_approvals the
+        install must fail (corrupt/tampered bundle)."""
+        cfg, wd = self._cfg("src_tamper")
+        _set_nonce0(cfg)
+        svcs = self._services(cfg)
+        for s in svcs:
+            _touch(wd / "wrapped-shares-out" / s / "member1_eph_wrapped.share")
+            _touch(wd / "share-set-approvals" / s / _approval_name(s))
+        broot = wd / "outbox" / "b"
+        ek.create_bundle(broot, "wrapped-shares", cfg)
+
+        # Add an extra approval file not recorded in the manifest.
+        extra = svcs[0]
+        _touch(broot / "approvals" / extra / _approval_name(extra, nonce=0).replace("alice", "mallory"))
+
+        cfg2, wd2 = self._cfg("coord_tamper")
+        _set_nonce0(cfg2)
+        with self.assertRaises(SystemExit):
+            ek.install_bundle(broot, cfg2)
 
 
 if __name__ == "__main__":

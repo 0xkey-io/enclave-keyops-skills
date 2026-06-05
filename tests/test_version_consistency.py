@@ -34,6 +34,23 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = REPO_ROOT / "VERSION"
 SKILL_DIRS = sorted((REPO_ROOT / "skills").glob("0xkey-keyops-*"))
 
+# Pinned-version patterns in the SKILL.md body that sync-skills.py manages.
+# Each regex has one capture group for the version token.
+_PINNED_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    (
+        "pinned download URL (releases/download/v<version>/)",
+        re.compile(r"releases/download/v([\d]+\.[\d]+\.[\d]+)/"),
+    ),
+    (
+        "keyops require-version <version>",
+        re.compile(r"keyops require-version ([\d]+\.[\d]+\.[\d]+)"),
+    ),
+    (
+        "keyops fetch-keyops --release-tag v<version>",
+        re.compile(r"keyops fetch-keyops --release-tag v([\d]+\.[\d]+\.[\d]+)"),
+    ),
+]
+
 
 def _read_repo_version() -> str:
     return VERSION_FILE.read_text(encoding="utf-8").strip()
@@ -109,6 +126,49 @@ class VersionConsistency(unittest.TestCase):
                     repo_version,
                     f"{skill_md.relative_to(REPO_ROOT)} inline ## Version & "
                     f"update mention ({got!r}) != VERSION ({repo_version!r})",
+                )
+
+    def test_each_skill_md_pinned_version_literals_match_repo_version(
+        self,
+    ) -> None:
+        """All version-stamped literals in SKILL.md body must equal VERSION.
+
+        sync-skills.py keeps these in sync on each release; this test is the
+        CI guard that catches a stale edit or a missed sync run.
+        """
+        repo_version = _read_repo_version()
+        for skill_dir in SKILL_DIRS:
+            skill_md = skill_dir / "SKILL.md"
+            text = skill_md.read_text(encoding="utf-8")
+            for label, pattern in _PINNED_PATTERNS:
+                with self.subTest(skill=skill_dir.name, pattern=label):
+                    matches = pattern.findall(text)
+                    self.assertTrue(
+                        matches,
+                        f"{skill_md.relative_to(REPO_ROOT)}: missing {label!r}; "
+                        "add the pinned command and re-run tools/sync-skills.py",
+                    )
+                    for found_version in matches:
+                        self.assertEqual(
+                            found_version,
+                            repo_version,
+                            f"{skill_md.relative_to(REPO_ROOT)}: {label!r} "
+                            f"has version {found_version!r} != VERSION "
+                            f"({repo_version!r}); run tools/sync-skills.py",
+                        )
+
+    def test_no_skill_md_uses_releases_latest_download(self) -> None:
+        """Pinned download URLs must replace the old `releases/latest/download/` form."""
+        for skill_dir in SKILL_DIRS:
+            skill_md = skill_dir / "SKILL.md"
+            with self.subTest(skill=skill_dir.name):
+                text = skill_md.read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "releases/latest/download/",
+                    text,
+                    f"{skill_md.relative_to(REPO_ROOT)} still uses "
+                    "releases/latest/download/ — replace with pinned "
+                    "releases/download/v<version>/ and run sync-skills.py",
                 )
 
 

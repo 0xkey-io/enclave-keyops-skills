@@ -46,6 +46,38 @@ First report state/found/missing/next; execute non-dangerous ready steps directl
 `member-roster.json`. Members must not choose them. If unknown, ask the
 Coordinator for the roster row first.
 
+## Hygiene checks (every member, before acting)
+
+Three recurring failure modes come from stale inputs, not from the ceremony
+itself. The agent should confirm all three at the start of a member session and
+refuse to proceed on a mismatch:
+
+1. **Latest skill + `keyops` — verified with `keyops require-version`.** Run:
+
+   ```bash
+   keyops require-version <version-from-your-SKILL.md>
+   ```
+
+   This command fails loud (exits 2) when the installed binary does not match
+   the skill version, and prints the exact command to fetch the correct binary.
+   Old `keyops` builds reintroduce already-fixed bugs (e.g. wrapped-shares
+   bundles silently missing the share-set approval). Do not proceed until
+   `keyops require-version` exits 0. If you do not know the expected version,
+   look at the `version:` line at the top of your SKILL.md file, or ask the
+   Coordinator which version they announced for this ceremony.
+2. **Coordinator-assigned alias / member-index only.** Use exactly the `(alias,
+   member_index)` the Coordinator published in `member-roster.json`. Never let the
+   user pick or guess these — a wrong alias yields `NotShareSetMember` /
+   `found 0 approvals`, and a wrong member-index silently corrupts the share slot.
+   Cross-check the alias against the received bundle's
+   `BUNDLE.json.members` slice.
+3. **This round's bundle, not an old one.** Verify the `.tgz` SHA256 against the
+   Coordinator's `.sha256`, and confirm you are operating on the bundle for the
+   current attestation round. A bundle from a previous round carries a stale
+   attestation/ephemeral key; wrapped shares produced from it are dead on arrival
+   at `ceremony post`. When in doubt, ask the Coordinator to confirm the current
+   round's bundle filename before reencrypting.
+
 ## Manifest Set member
 
 ```text
@@ -58,6 +90,7 @@ Vault mode for the long-term key: <yubikey | file>
 My external secret absolute path: <secret-path or unknown or n/a-yubikey>
   (only for vault mode = file; use n/a-yubikey for YubiKey mode)
 Review bundle received: <path or unknown>
+Before acting, run the Hygiene checks (latest skill + keyops, roster-assigned alias, current-round bundle verified against its .sha256).
 First report state/found/missing/next; execute non-dangerous ready steps directly after stating their purpose.
 ```
 
@@ -79,5 +112,6 @@ My external share absolute path: <path or unknown; absent before first ceremony 
    It is separate from the secret and is always an external file, even in YubiKey mode.)
 Genesis-output bundle received: <path or unknown; required for first ceremony>
 Share-request bundle received: <path or unknown>
+Before acting, run the Hygiene checks (latest skill + keyops, roster-assigned alias + member-index, current-round bundle verified against its .sha256).
 First report state/found/missing/next; execute non-dangerous ready steps directly after stating their purpose.
 ```

@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-builder
-version: 0.5.7
+version: 0.5.8
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Builder / release operator role:
   producing verifiable qos_client (release + operator-native), qOS release with
@@ -102,10 +102,11 @@ The preferred invocation is the self-contained `keyops` binary (no Python
 required). On first use, fetch it with:
 
 ```bash
-curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
-curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/download/v0.5.8/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/download/v0.5.8/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
 shasum -a 256 -c keyops.*.sha256
 install -m 0755 keyops.* ./bin/keyops   # or any directory on $PATH
+keyops require-version 0.5.8           # fail-loud if binary doesn't match this skill
 ```
 
 Builder publishes the operator-client release to GitHub Releases on
@@ -127,7 +128,7 @@ Builder's required outputs and how they feed Coordinator / members:
 
 ## Version & update
 
-This skill is version `0.5.7` (see the frontmatter at the top of this
+This skill is version `0.5.8` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any
@@ -139,6 +140,14 @@ Check the latest published version with `gh release view -R
 `git -C <skill-src> ls-remote --tags origin | tail -1`). Upgrade with
 `npx skills update 0xkey-keyops-builder` (npm-style install) or
 `git -C <skill-src> pull --tags` (clone install).
+
+After upgrading the skill, update the `keyops` binary to the matching version
+and verify:
+
+```bash
+keyops fetch-keyops --release-tag v0.5.8
+keyops require-version 0.5.8
+```
 
 ## Runbook
 

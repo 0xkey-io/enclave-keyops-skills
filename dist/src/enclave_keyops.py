@@ -330,6 +330,43 @@ def validate_config(cfg: Config) -> None:
         raise SystemExit(2)
 
 
+def filter_services(
+    cfg: Config, names: Optional[Sequence[str]]
+) -> List[Dict[str, Any]]:
+    """Resolve an optional `--service` name list to service dicts.
+
+    `names` empty/None -> all five services (the default, all-at-once behaviour).
+    Otherwise return exactly the named services in roster order, validating each
+    name and de-duplicating. This is the foundation for single-service recovery:
+    every provisioning ceremony command (boot / attestation / reencrypt / post /
+    verify) and the share-request bundle can be scoped to one service without
+    re-touching the four healthy ones — re-booting a healthy, provisioned service
+    would wipe its in-RAM quorum key and turn a one-service incident into an
+    outage.
+    """
+    allsvc = cfg.all_services()
+    if not names:
+        return allsvc
+    by_name = {s["name"]: s for s in allsvc}
+    requested: set[str] = set()
+    for n in names:
+        if n not in by_name:
+            sys.stderr.write(
+                f"unknown --service {n!r}; valid services: "
+                f"{', '.join(sorted(by_name))}\n"
+            )
+            raise SystemExit(2)
+        requested.add(n)
+    # Always process in roster/config order, never the order the flags were
+    # given, so the boot/post sequence stays deterministic regardless of how the
+    # operator typed `--service`.
+    return [s for s in allsvc if s["name"] in requested]
+
+
+def selected_services(cfg: Config, ns: argparse.Namespace) -> List[Dict[str, Any]]:
+    return filter_services(cfg, getattr(ns, "service", None))
+
+
 def check_sensitive_external_path(path: Path, *, workdir: Path, label: str) -> None:
     expanded = path.expanduser()
     resolved = expanded.resolve()
@@ -431,6 +468,51 @@ If you miss either touch window, qos_client can fail with
 FailedToGenerateSelfSignedCert and leave a half-written PIV slot. Do not walk
 away after typing the PIN.
 """
+
+
+PIVOT_ARGS_MANIFEST_NOTICE_HEADER = """\
+
+============================================================
+IMPORTANT: pivot args are part of the attested manifest
+============================================================
+Effective --pivot-args per service (these go verbatim into the manifest and
+are covered by attestation):
+"""
+
+PIVOT_ARGS_MANIFEST_NOTICE_FOOTER = """\
+Any env-specific value embedded above — e.g. the notarizer recipient pubkey or
+the signer / tls-fetcher email parameters — is part of the manifest. If ANY of
+these differ from what the live enclave was booted with, this is a manifest
+change, not a no-op, and it forces a FULL re-ceremony for every changed service:
+
+  1. Manifest set re-signs   — the old *.approval signed the OLD manifest and is
+     now invalid; you must re-collect approve-manifest from the manifest set.
+  2. Share set re-collaborates — the changed service must be re-booted
+     (`ceremony boot` / boot-standard); after boot the in-RAM quorum key is
+     gone, so share members must run proxy-re-encrypt-share + you must run
+     `ceremony post` to re-inject the existing quorum key.
+
+ACTION FOR THE AGENT: before distributing the review bundle, explicitly ask the
+operator to provide / confirm these env-specific pivot-arg values (notarizer
+recipient pubkey, signer + tls-fetcher email parameters). Do not assume the
+config defaults are correct for this environment.
+============================================================
+"""
+
+
+def print_pivot_args_manifest_notice(cfg: "Config") -> None:
+    """Surface the manifest-impact of pivot args before generate-manifest runs.
+
+    pivot args are baked into the attested manifest, so changing them (notably
+    the notarizer recipient pubkey and signer / tls-fetcher email parameters)
+    forces a full re-ceremony. We always print the effective args plus this
+    reminder so the agent prompts the operator to confirm env-specific values
+    rather than silently shipping config defaults. Advisory only — never blocks.
+    """
+    sys.stderr.write(PIVOT_ARGS_MANIFEST_NOTICE_HEADER)
+    for svc in cfg.all_services():
+        sys.stderr.write(f"  {svc['name']}: {_pivot_args_for_service(cfg, svc)}\n")
+    sys.stderr.write(PIVOT_ARGS_MANIFEST_NOTICE_FOOTER)
 
 
 def _run_ykman_capture(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -947,6 +1029,8 @@ def cmd_manifest_generate(ns: argparse.Namespace, cfg: Config, audit_log: Option
     defs = cfg.raw["defaults"]
     bridge = str(defs["bridge_config_json"])
 
+    print_pivot_args_manifest_notice(cfg)
+
     for svc in cfg.all_services():
         pname = svc["pivot_binary_name"]
         hash_path = hashes / f"{pname}-pivot-hash.txt"
@@ -1080,6 +1164,70 @@ def cmd_manifest_approve(ns: argparse.Namespace, cfg: Config, audit_log: Optiona
                 audit_file_hash(audit_log, approval)
 
 
+ORIGINAL_ENVELOPE_SUBDIR = "original"
+
+
+def _envelope_name(svc_name: str) -> str:
+    return f"{svc_name}-manifest-envelope.json"
+
+
+def original_envelope_path(mroot: Path, svc_name: str) -> Path:
+    return mroot / ORIGINAL_ENVELOPE_SUBDIR / _envelope_name(svc_name)
+
+
+def write_original_envelope(mroot: Path, svc_name: str) -> None:
+    """Snapshot the just-generated envelope as the immutable boot reference.
+
+    The manifest envelope (manifest + manifest-set approvals) is the ONLY
+    artifact `boot-standard` should consume. A real incident mutated a working
+    envelope -- shareSetApprovals were injected into the JSON -- and the enclave
+    was then booted from it, surfacing only as an opaque
+    `ProtocolMsgDeserialization`. We keep a read-only copy under
+    `manifest/original/` so (a) every consumer can detect drift and fail loud,
+    and (b) the operator always has a clean restore source.
+    """
+    src = mroot / _envelope_name(svc_name)
+    dst = original_envelope_path(mroot, svc_name)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    # A regenerated envelope must overwrite the prior read-only snapshot.
+    if dst.exists():
+        dst.chmod(0o644)
+    shutil.copy2(src, dst)
+    dst.chmod(0o444)
+
+
+def assert_envelope_unmodified(mroot: Path, svc_name: str) -> None:
+    """Fail loud if the working envelope drifted from the immutable original.
+
+    Catches the mutated-envelope footgun at the point of use (boot / attestation
+    / share-request packaging) instead of letting it reach the enclave as a
+    cryptic `ProtocolMsgDeserialization`. If no original snapshot exists (the
+    envelope was generated by an older keyops), this is advisory only so legacy
+    workdirs still run.
+    """
+    working = mroot / _envelope_name(svc_name)
+    original = original_envelope_path(mroot, svc_name)
+    if not original.is_file():
+        sys.stderr.write(
+            f"NOTE: no immutable envelope baseline for {svc_name} ({original}); "
+            "skipping integrity check. Re-run `manifest envelope` to establish "
+            "one.\n"
+        )
+        return
+    require_file(working, str(working))
+    if working.read_bytes() != original.read_bytes():
+        sys.stderr.write(
+            f"ERROR: {working} differs from the immutable original {original}.\n"
+            "The manifest envelope must never be edited after `manifest envelope` "
+            "generated it. A common cause is injecting shareSetApprovals into the "
+            "envelope JSON, which the enclave rejects as ProtocolMsgDeserialization "
+            "on boot.\n"
+            "Restore the canonical envelope before continuing:\n"
+            f"  cp {original} {working}\n"
+        )
+        raise SystemExit(2)
+
+
 def cmd_manifest_envelope(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     for svc in cfg.all_services():
@@ -1087,7 +1235,7 @@ def cmd_manifest_envelope(ns: argparse.Namespace, cfg: Config, audit_log: Option
         approvals = mroot / "approvals" / svc["name"]
         if not ns.dry_run:
             validate_current_round_approvals(mroot, svc)
-        envpath = mroot / f"{svc['name']}-manifest-envelope.json"
+        envpath = mroot / _envelope_name(svc["name"])
         argv = [
             str(cfg.qos_client),
             "generate-manifest-envelope",
@@ -1101,6 +1249,8 @@ def cmd_manifest_envelope(ns: argparse.Namespace, cfg: Config, audit_log: Option
         print(f"== generate-manifest-envelope {svc['name']}")
         run_process(argv, dry_run=ns.dry_run, cwd=cfg.workdir, audit_log=audit_log)
         audit_file_hash(audit_log, envpath)
+        if not ns.dry_run:
+            write_original_envelope(mroot, svc["name"])
 
 
 def overlay_path(cfg: Config) -> Path:
@@ -1191,7 +1341,9 @@ def cmd_ceremony_boot(ns: argparse.Namespace, cfg: Config, audit_log: Optional[P
     if ns.unsafe_skip_attestation:
         confirm_dangerous(ns, "unsafe-skip-attestation disables attestation verification", "unsafe-skip-attestation")
 
-    for svc in cfg.all_services():
+    for svc in selected_services(cfg, ns):
+        if not ns.dry_run:
+            assert_envelope_unmodified(mroot, svc["name"])
         hip = _svc_host(cfg, svc, ns.resolve_pod_ip)
         argv = [
             str(cfg.qos_client),
@@ -1200,7 +1352,7 @@ def cmd_ceremony_boot(ns: argparse.Namespace, cfg: Config, audit_log: Optional[P
             "--pivot-path",
             str(pivots / svc["pivot_binary_name"]),
             "--manifest-envelope-path",
-            str(mroot / f"{svc['name']}-manifest-envelope.json"),
+            str(mroot / _envelope_name(svc["name"])),
             "--pcr3-preimage-path",
             str(pcr),
         ]
@@ -1214,14 +1366,16 @@ def cmd_ceremony_attestation(ns: argparse.Namespace, cfg: Config, audit_log: Opt
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     att_root = resolve_path(cfg.workdir, ns.attest_dir)
     att_root.mkdir(parents=True, exist_ok=True)
-    for svc in cfg.all_services():
+    for svc in selected_services(cfg, ns):
+        if not ns.dry_run:
+            assert_envelope_unmodified(mroot, svc["name"])
         hip = _svc_host(cfg, svc, ns.resolve_pod_ip)
         argv = [
             str(cfg.qos_client),
             "get-attestation-doc",
             *_boot_uri_args(cfg, svc, hip),
             "--manifest-envelope-path",
-            str(mroot / f"{svc['name']}-manifest-envelope.json"),
+            str(mroot / _envelope_name(svc["name"])),
             "--attestation-doc-path",
             str(att_root / f"{svc['name']}.cose"),
         ]
@@ -1440,6 +1594,61 @@ def approval_context(svc: Mapping[str, Any]) -> Tuple[str, str]:
     return namespace, str(int(nonce))
 
 
+# Single source of truth for the two Share-Set member output directories.
+# `ceremony reencrypt` (producer) and `bundle create`/`bundle install`
+# (packager/consumer) MUST resolve these to the same place; otherwise a
+# share-set approval can be written somewhere the bundle never looks and the
+# wrapped-shares bundle ships without it. Both are optional config keys so
+# existing configs keep working with the historical defaults.
+WRAPPED_SHARES_OUT_DEFAULT = "wrapped-shares-out"
+SHARE_SET_APPROVALS_DEFAULT = "share-set-approvals"
+
+
+def wrapped_out_dir(cfg: "Config") -> str:
+    return cfg.paths().get("wrapped_shares_out_dir", WRAPPED_SHARES_OUT_DEFAULT)
+
+
+def share_set_approvals_dir(cfg: "Config") -> str:
+    return cfg.paths().get("share_set_approvals_dir", SHARE_SET_APPROVALS_DEFAULT)
+
+
+def has_matching_share_set_approval(ss_svc_dir: Path, svc: Mapping[str, Any]) -> bool:
+    """Whether a share-set approval matching svc's namespace+nonce exists.
+
+    Mirrors the matching rule used by `validate_current_round_approvals` /
+    `approval_for`: an approval counts only when its filename carries the
+    service namespace and ends with the current `-<nonce>`.
+    """
+    if not ss_svc_dir.is_dir():
+        return False
+    namespace, nonce = approval_context(svc)
+    for p in sorted(ss_svc_dir.glob("*.approval")):
+        if namespace in p.stem and p.stem.endswith(f"-{nonce}"):
+            return True
+    return False
+
+
+def require_share_set_approval(ss_root: Path, svc: Mapping[str, Any]) -> None:
+    """Fail loudly if a service with a wrapped share has no share-set approval.
+
+    This is the invariant that keeps a wrapped-shares bundle from silently
+    shipping without the approval `ceremony post` needs. Enforced on both the
+    producer (`create_bundle`) and consumer (`install_bundle`) sides.
+    """
+    namespace, nonce = approval_context(svc)
+    ss_svc_dir = ss_root / svc["name"]
+    if not has_matching_share_set_approval(ss_svc_dir, svc):
+        sys.stderr.write(
+            f"wrapped-shares bundle: service {svc['name']!r} has a wrapped share "
+            f"but no matching share-set approval in {ss_svc_dir} "
+            f"(expected *.approval with namespace={namespace} nonce={nonce}). "
+            f"Did `ceremony reencrypt` run for this service, or was "
+            f"--share-set-approvals-dir pointed elsewhere than config "
+            f"paths.share_set_approvals_dir?\n"
+        )
+        raise SystemExit(2)
+
+
 def validate_current_round_approvals(mroot: Path, svc: Mapping[str, Any]) -> None:
     d = mroot / "approvals" / svc["name"]
     namespace, nonce = approval_context(svc)
@@ -1513,10 +1722,12 @@ def cmd_ceremony_reencrypt(ns: argparse.Namespace, cfg: Config, audit_log: Optio
     pcr = resolve_path(cfg.workdir, cfg.paths()["pcr3_preimage_path"])
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     att_root = resolve_path(cfg.workdir, ns.attest_dir)
-    out_root = resolve_path(cfg.workdir, ns.wrapped_out_dir)
-    ss_approvals_root = resolve_path(cfg.workdir, ns.share_set_approvals_dir)
+    out_root = resolve_path(cfg.workdir, ns.wrapped_out_dir or wrapped_out_dir(cfg))
+    ss_approvals_root = resolve_path(
+        cfg.workdir, ns.share_set_approvals_dir or share_set_approvals_dir(cfg)
+    )
     mid = ns.member_index
-    for svc in cfg.all_services():
+    for svc in selected_services(cfg, ns):
         envpath = mroot / f"{svc['name']}-manifest-envelope.json"
         adoc = att_root / f"{svc['name']}.cose"
         # qos_client writes the Share Set Approval to --approval-path (it never
@@ -1597,7 +1808,7 @@ def cmd_ceremony_post(ns: argparse.Namespace, cfg: Config, audit_log: Optional[P
     gorder = parse_int_list(ns.post_global_order)
     ap_alias = approval_alias(ns, cfg)
 
-    for svc in cfg.all_services():
+    for svc in selected_services(cfg, ns):
         hip = _svc_host(cfg, svc, ns.resolve_pod_ip)
         order = post_order_for_svc(svc, gorder)
         for mid in order:
@@ -1628,7 +1839,7 @@ def cmd_verify(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -
         sys.stderr.write("set verification.use_kubectl_for_health=true\n")
         raise SystemExit(2)
 
-    for svc in cfg.all_services():
+    for svc in selected_services(cfg, ns):
         name = svc["name"]
         lbl = svc.get("deployment_label_app") or name
         hp = int(svc["host_port_qos"])
@@ -1824,26 +2035,56 @@ def _roster_slice_for_kind(
     return {label: full.get(label, []) for label in sets}
 
 
-def write_bundle_meta(root: Path, kind: str, cfg: Config) -> None:
+def write_bundle_meta(
+    root: Path,
+    kind: str,
+    cfg: Config,
+    share_set_approvals: Optional[Dict[str, List[str]]] = None,
+    services: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    # `services` lets a scoped bundle (e.g. a single-service share-request)
+    # record only the services it actually carries, so the consumer
+    # (`bundle install`) and `ceremony reencrypt` operate on the same subset.
+    svcs = services if services is not None else cfg.all_services()
     meta: Dict[str, Any] = {
         "kind": kind,
-        "services": [s["name"] for s in cfg.all_services()],
+        "services": [s["name"] for s in svcs],
         "manifest_namespaces": {
-            s["name"]: s["manifest_namespace"] for s in cfg.all_services()
+            s["name"]: s["manifest_namespace"] for s in svcs
         },
-        "manifest_nonces": {s["name"]: s.get("manifest_nonce") for s in cfg.all_services()},
+        "manifest_nonces": {s["name"]: s.get("manifest_nonce") for s in svcs},
     }
     roster_slice = _roster_slice_for_kind(cfg, kind)
     if roster_slice is not None:
         meta["members"] = roster_slice
+    if share_set_approvals is not None:
+        # Manifest of the share-set approvals packaged per service. Lets the
+        # consumer (`bundle install`) verify nothing was dropped in transit and
+        # that every wrapped share has its approval.
+        meta["share_set_approvals"] = share_set_approvals
     (root / "BUNDLE.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
-def create_bundle(root: Path, kind: str, cfg: Config) -> None:
+def create_bundle(
+    root: Path,
+    kind: str,
+    cfg: Config,
+    services: Optional[Sequence[str]] = None,
+) -> None:
     if root.exists():
         sys.stderr.write(f"bundle dir already exists: {root}\n")
         raise SystemExit(2)
+    if services and kind != "share-request":
+        sys.stderr.write(
+            f"--service is only supported for --kind share-request, not {kind!r}\n"
+        )
+        raise SystemExit(2)
     root.mkdir(parents=True)
+    svc_subset = filter_services(cfg, services)
+    meta_services: Optional[List[Dict[str, Any]]] = (
+        svc_subset if services else None
+    )
+    share_set_approvals: Optional[Dict[str, List[str]]] = None
     mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
     pcr = resolve_path(cfg.workdir, cfg.paths()["pcr3_preimage_path"])
     qkp = resolve_path(cfg.workdir, cfg.paths()["quorum_key_pub_path"])
@@ -1866,8 +2107,9 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
         if aws_pcrs.is_file():
             copy_file(aws_pcrs, root / "qos-release" / "aws-x86_64.pcrs")
     elif kind == "share-request":
-        for svc in cfg.all_services():
-            copy_file(mroot / f"{svc['name']}-manifest-envelope.json", root / f"{svc['name']}-manifest-envelope.json")
+        for svc in svc_subset:
+            assert_envelope_unmodified(mroot, svc["name"])
+            copy_file(mroot / _envelope_name(svc["name"]), root / _envelope_name(svc["name"]))
             copy_file(att / f"{svc['name']}.cose", root / "attestations" / f"{svc['name']}.cose")
             copy_tree_contents(mroot / "approvals" / svc["name"], root / "approvals" / svc["name"])
         copy_tree_contents(resolve_path(cfg.workdir, cfg.paths()["manifest_set_dir"]), root / "manifest-set")
@@ -1875,10 +2117,35 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
     elif kind == "approvals":
         copy_tree_contents(mroot / "approvals", root / "approvals")
     elif kind == "wrapped-shares":
-        copy_tree_contents(resolve_path(cfg.workdir, "wrapped-shares-out"), root / "wrapped-shares")
-        ss_approvals = resolve_path(cfg.workdir, "share-set-approvals")
-        if ss_approvals.is_dir():
-            copy_tree_contents(ss_approvals, root / "approvals")
+        wrapped_src = resolve_path(cfg.workdir, wrapped_out_dir(cfg))
+        copy_tree_contents(wrapped_src, root / "wrapped-shares")
+        ss_root = resolve_path(cfg.workdir, share_set_approvals_dir(cfg))
+        # Invariant: every service that has a wrapped share MUST ship a matching
+        # share-set approval. Enforcing it here (the earliest point) instead of
+        # leaving the copy optional is what stops the bundle from silently
+        # omitting approvals and failing far later on the Coordinator's
+        # `ceremony post` with "expected exactly one approval ... found 0".
+        svc_by_name = {s["name"]: s for s in cfg.all_services()}
+        wrapped_dst = root / "wrapped-shares"
+        services_with_shares = sorted(
+            d.name
+            for d in wrapped_dst.iterdir()
+            if d.is_dir() and d.name in svc_by_name
+        ) if wrapped_dst.is_dir() else []
+        if not services_with_shares:
+            sys.stderr.write(
+                f"wrapped-shares bundle: no per-service wrapped shares found under "
+                f"{wrapped_src}; did `ceremony reencrypt` run?\n"
+            )
+            raise SystemExit(2)
+        share_set_approvals = {}
+        for name in services_with_shares:
+            svc = svc_by_name[name]
+            require_share_set_approval(ss_root, svc)
+            copy_tree_contents(ss_root / name, root / "approvals" / name)
+            share_set_approvals[name] = sorted(
+                p.name for p in (root / "approvals" / name).glob("*.approval")
+            )
     elif kind == "genesis-output":
         # Genesis-output bundle is built on the Coordinator after `ceremony
         # genesis-boot` and shipped to every Share Set member so they can run
@@ -1905,7 +2172,13 @@ def create_bundle(root: Path, kind: str, cfg: Config) -> None:
         )
         if roster_path.is_file():
             copy_file(roster_path, root / "member-roster.json")
-    write_bundle_meta(root, kind, cfg)
+    write_bundle_meta(
+        root,
+        kind,
+        cfg,
+        share_set_approvals=share_set_approvals,
+        services=meta_services,
+    )
     write_sha256sums(root)
 
 
@@ -1997,7 +2270,7 @@ def cmd_bundle_create(ns: argparse.Namespace, cfg: Config, audit_log: Optional[P
             # mkdtemp already created `root`; create_bundle refuses a
             # pre-existing dir, so build into a fresh child it owns.
             root = root / "bundle"
-        create_bundle(root, ns.kind, cfg)
+        create_bundle(root, ns.kind, cfg, services=getattr(ns, "service", None))
         if not ephemeral:
             print(f"created {ns.kind} bundle: {root}")
         audit_file_hash(audit_log, root / "SHA256SUMS")
@@ -2189,13 +2462,47 @@ def install_bundle(bundle_root: Path, cfg: Config) -> None:
         # `ceremony post` reads from --wrapped-in-dir (default
         # "wrapped-shares-coordinator"); the Coordinator merges each
         # member's wrapped shares into wrapped-shares-coordinator/<service>/.
+        #
+        # Defense in depth: enforce the same invariant the producer does — every
+        # service with a wrapped share must carry a share-set approval. This
+        # catches bundles built by an older/buggy producer (or trimmed in
+        # transit) at install time instead of at `ceremony post`.
+        wrapped_root = bundle_root / "wrapped-shares"
+        approvals_root = bundle_root / "approvals"
+        services_with_shares = sorted(
+            d.name for d in wrapped_root.iterdir() if d.is_dir()
+        ) if wrapped_root.is_dir() else []
+        manifest = meta.get("share_set_approvals")
+        for svc_name in services_with_shares:
+            svc_approval_dir = approvals_root / svc_name
+            on_disk = sorted(
+                p.name for p in svc_approval_dir.glob("*.approval")
+            ) if svc_approval_dir.is_dir() else []
+            if not on_disk:
+                sys.stderr.write(
+                    f"wrapped-shares bundle: service {svc_name!r} has a wrapped "
+                    f"share but no share-set approval under {svc_approval_dir}. "
+                    f"Re-build the bundle with keyops >= 0.5.8 "
+                    f"(`bundle create --kind wrapped-shares`).\n"
+                )
+                raise SystemExit(2)
+            if manifest is not None:
+                expected = sorted(manifest.get(svc_name, []))
+                if on_disk != expected:
+                    sys.stderr.write(
+                        f"wrapped-shares bundle: service {svc_name!r} share-set "
+                        f"approvals do not match BUNDLE.json manifest "
+                        f"(expected {expected}, found {on_disk}); bundle may be "
+                        f"corrupt or tampered.\n"
+                    )
+                    raise SystemExit(2)
         _install_tree(
-            bundle_root / "wrapped-shares",
+            wrapped_root,
             resolve_path(cfg.workdir, "wrapped-shares-coordinator"),
         )
-        if (bundle_root / "approvals").is_dir():
+        if approvals_root.is_dir():
             mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
-            _install_tree(bundle_root / "approvals", mroot / "approvals")
+            _install_tree(approvals_root, mroot / "approvals")
     else:
         sys.stderr.write(
             f"bundle install: unsupported kind {kind!r}; extract-only.\n"
@@ -2209,19 +2516,41 @@ def install_bundle(bundle_root: Path, cfg: Config) -> None:
 
 def cmd_bundle_extract(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
     archive = resolve_path(cfg.workdir, ns.archive)
-    dest = resolve_path(cfg.workdir, ns.bundle_dir)
+    # --install only needs the extracted tree as a throwaway staging area, so
+    # --bundle-dir is optional in that mode (mirrors `bundle create --archive`).
+    # Without --install the caller wants a persistent dir to inspect, so require
+    # an explicit --bundle-dir.
+    if not ns.bundle_dir and not ns.install:
+        sys.stderr.write(
+            "bundle extract requires --bundle-dir (or pass --install to extract "
+            "into a throwaway staging dir)\n"
+        )
+        raise SystemExit(2)
+    ephemeral = ns.bundle_dir is None
+    if ns.bundle_dir:
+        dest = resolve_path(cfg.workdir, ns.bundle_dir)
+    else:
+        dest = Path(tempfile.mkdtemp(prefix="keyops-extract-", dir=str(cfg.workdir)))
     if ns.dry_run:
-        print(f"[dry-run] extract {archive} to {dest}")
+        where = "temp staging dir" if ephemeral else dest
+        print(f"[dry-run] extract {archive} to {where}")
         if ns.install:
             print("[dry-run] --install: would distribute files into workdir")
+        if ephemeral:
+            shutil.rmtree(dest, ignore_errors=True)
         return
-    safe_extract_tar(archive, dest)
-    print(f"extracted {archive} to {dest}")
-    verify_root = _find_bundle_root(dest)
-    verify_sha256sums(verify_root)
-    audit_file_hash(audit_log, archive)
-    if ns.install:
-        install_bundle(verify_root, cfg)
+    try:
+        safe_extract_tar(archive, dest)
+        if not ephemeral:
+            print(f"extracted {archive} to {dest}")
+        verify_root = _find_bundle_root(dest)
+        verify_sha256sums(verify_root)
+        audit_file_hash(audit_log, archive)
+        if ns.install:
+            install_bundle(verify_root, cfg)
+    finally:
+        if ephemeral:
+            shutil.rmtree(dest, ignore_errors=True)
 
 
 def cmd_bundle_install(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
@@ -2235,6 +2564,28 @@ def cmd_bundle_install(ns: argparse.Namespace, cfg: Config, audit_log: Optional[
         print(f"[dry-run] install {kind} bundle from {root} into workdir")
         return
     install_bundle(root, cfg)
+
+
+def _add_service_selector(sp: argparse.ArgumentParser, *, extra: str = "") -> None:
+    """Attach a repeatable `--service NAME` selector for single-service recovery.
+
+    Omitting it keeps the default all-five behaviour. Passing it limits the
+    command to the named service(s) so a failed service can be recovered without
+    re-touching the healthy ones.
+    """
+    help_text = (
+        "limit this command to the named service (repeatable); default = all "
+        "five. Use for single-service recovery."
+    )
+    if extra:
+        help_text = f"{help_text} {extra}"
+    sp.add_argument(
+        "--service",
+        action="append",
+        default=None,
+        metavar="NAME",
+        help=help_text,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -2388,10 +2739,12 @@ def build_parser() -> argparse.ArgumentParser:
     cb = cs.add_parser("boot")
     cb.add_argument("--resolve-pod-ip", action="store_true")
     cb.add_argument("--unsafe-skip-attestation", action="store_true")
+    _add_service_selector(cb)
     cb.set_defaults(handler="cer_boot")
     ca = cs.add_parser("attestation")
     ca.add_argument("--attest-dir", default="attestations")
     ca.add_argument("--resolve-pod-ip", action="store_true")
+    _add_service_selector(ca)
     ca.set_defaults(handler="cer_att")
     cr = cs.add_parser("reencrypt")
     cr.add_argument("--alias", required=True)
@@ -2408,8 +2761,21 @@ def build_parser() -> argparse.ArgumentParser:
     cr.add_argument("--share-path", required=True)
     cr.add_argument("--member-index", type=int, required=True)
     cr.add_argument("--attest-dir", default="attestations")
-    cr.add_argument("--wrapped-out-dir", default="wrapped-shares-out")
-    cr.add_argument("--share-set-approvals-dir", default="share-set-approvals")
+    cr.add_argument(
+        "--wrapped-out-dir",
+        default=None,
+        help="where to write wrapped shares; defaults to config "
+        "paths.wrapped_shares_out_dir (or 'wrapped-shares-out'). Keep it in "
+        "sync with the bundle packager — overriding it without matching config "
+        "makes `bundle create --kind wrapped-shares` look in the wrong place.",
+    )
+    cr.add_argument(
+        "--share-set-approvals-dir",
+        default=None,
+        help="where to write share-set approvals; defaults to config "
+        "paths.share_set_approvals_dir (or 'share-set-approvals'). Keep it in "
+        "sync with the bundle packager.",
+    )
     cr.add_argument(
         "--unsafe-skip-attestation",
         action="store_true",
@@ -2417,15 +2783,18 @@ def build_parser() -> argparse.ArgumentParser:
         "expired attestation cert (qos_client proxy-re-encrypt-share has no "
         "--validation-time-override). See the delayed-reencrypt runbook.",
     )
+    _add_service_selector(cr)
     cr.set_defaults(handler="cer_rec")
     cp = cs.add_parser("post")
     cp.add_argument("--wrapped-in-dir", default="wrapped-shares-coordinator")
     cp.add_argument("--resolve-pod-ip", action="store_true")
     cp.add_argument("--post-global-order", default=None)
     cp.add_argument("--approval-alias", default=None)
+    _add_service_selector(cp)
     cp.set_defaults(handler="cer_post")
 
     vf = subs.add_parser("verify")
+    _add_service_selector(vf)
     vf.set_defaults(handler="verify")
 
     b = subs.add_parser("bundle")
@@ -2443,6 +2812,11 @@ def build_parser() -> argparse.ArgumentParser:
         "(a temp dir is used and removed after packing)",
     )
     bcr.add_argument("--archive", default=None)
+    _add_service_selector(
+        bcr,
+        extra="Only valid with --kind share-request (scopes a single-service "
+        "recovery share-request).",
+    )
     bcr.set_defaults(handler="bundle_create")
     bc = bs.add_parser("checksums")
     bc.add_argument("--bundle-dir", required=True)
@@ -2452,7 +2826,12 @@ def build_parser() -> argparse.ArgumentParser:
     bv.set_defaults(handler="bundle_verify")
     be = bs.add_parser("extract")
     be.add_argument("--archive", required=True)
-    be.add_argument("--bundle-dir", required=True)
+    be.add_argument(
+        "--bundle-dir",
+        default=None,
+        help="staging dir for the extracted bundle; optional when --install is "
+        "given (a temp dir is used and removed after install)",
+    )
     be.add_argument(
         "--install",
         action="store_true",
