@@ -416,6 +416,24 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   --share-path "$KEY_DIR/$ALIAS.share"
 ```
 
+#### Single-service recovery rounds
+
+If the Coordinator is recovering just one failed service, the share-request
+bundle they send will contain only that service (its `BUNDLE.json.services` lists
+a single name). Scope your reencrypt to match by adding `--service <name>` (the
+same name shown in the bundle):
+
+```bash
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  ceremony reencrypt --service signer \
+  --alias "$ALIAS" --member-index "$MEMBER_INDEX" \
+  --yubikey --share-path "$KEY_DIR/$ALIAS.share"
+```
+
+Without `--service`, reencrypt iterates all five services and will fail on the
+ones the single-service bundle did not include. Check the bundle review summary
+(it lists the services present) and pass the matching `--service` value(s).
+
 #### Delayed reencrypt (`CertExpired`)
 
 The attestation certificate embedded in the share-request bundle is valid for

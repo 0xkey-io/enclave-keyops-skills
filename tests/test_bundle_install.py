@@ -179,6 +179,55 @@ class InstallRoundTripTests(unittest.TestCase):
         self.assertTrue((wd2 / p2["manifest_set_dir"] / "alice.pub").is_file())
         self.assertTrue((wd2 / p2["pcr3_preimage_path"]).is_file())
 
+    def test_share_request_scoped_to_single_service(self) -> None:
+        cfg, wd = self._cfg("src_req_scoped")
+        p = cfg.paths()
+        mroot = wd / p["workdir_manifest_subdir"]
+        svcs = self._services(cfg)
+        for s in svcs:
+            _touch(mroot / f"{s}-manifest-envelope.json", f"env-{s}")
+            _touch(wd / "attestations" / f"{s}.cose", f"cose-{s}")
+            _touch(mroot / "approvals" / s / "alice.approval", f"appr-{s}")
+        _touch(wd / p["manifest_set_dir"] / "alice.pub")
+        _touch(wd / p["pcr3_preimage_path"])
+        _touch(wd / p["member_roster_path"], "{}")
+
+        broot = wd / "outbox" / "req-signer"
+        ek.create_bundle(broot, "share-request", cfg, services=["signer"])
+
+        # only the scoped service is packaged
+        self.assertTrue((broot / "signer-manifest-envelope.json").is_file())
+        for s in svcs:
+            if s == "signer":
+                continue
+            self.assertFalse(
+                (broot / f"{s}-manifest-envelope.json").is_file(),
+                f"{s} must NOT be in a signer-scoped bundle",
+            )
+        # BUNDLE.json records only the scoped subset so reencrypt/install agree
+        meta = json.loads((broot / "BUNDLE.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta["services"], ["signer"])
+        self.assertEqual(list(meta["manifest_namespaces"]), ["signer"])
+
+        # install on the member side only distributes the scoped service
+        cfg2, wd2 = self._cfg("member_req_scoped")
+        ek.install_bundle(broot, cfg2)
+        mroot2 = wd2 / cfg2.paths()["workdir_manifest_subdir"]
+        self.assertTrue((mroot2 / "signer-manifest-envelope.json").is_file())
+        self.assertFalse((mroot2 / "notarizer-manifest-envelope.json").exists())
+
+    def test_share_request_unknown_service_errors(self) -> None:
+        cfg, wd = self._cfg("src_req_badsvc")
+        broot = wd / "outbox" / "req-bad"
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(broot, "share-request", cfg, services=["nope"])
+
+    def test_service_selector_rejected_for_non_share_request(self) -> None:
+        cfg, wd = self._cfg("src_req_wrongkind")
+        broot = wd / "outbox" / "req-wrongkind"
+        with self.assertRaises(SystemExit):
+            ek.create_bundle(broot, "review", cfg, services=["signer"])
+
     # ----- wrapped-shares ----------------------------------------------------
     def test_wrapped_shares_round_trip_matches_post_reads(self) -> None:
         cfg, wd = self._cfg("src_wrap")
@@ -489,6 +538,44 @@ class BundleCreateArchiveTests(unittest.TestCase):
         cfg, wd = self._cfg("src_archive_none")
         with self.assertRaises(SystemExit):
             ek.cmd_bundle_create(self._ns(), cfg, None)
+
+    def test_extract_no_bundle_dir_no_install_errors(self) -> None:
+        cfg, wd = self._cfg("src_extract_guard")
+        self._seed_wrapped(cfg, wd)
+        ek.cmd_bundle_create(self._ns(archive="out/wrap.tgz"), cfg, None)
+        cfg2, wd2 = self._cfg("coord_extract_guard")
+        ns_x = ek.argparse.Namespace(
+            archive=str(wd / "out" / "wrap.tgz"),
+            bundle_dir=None,
+            install=False,
+            dry_run=False,
+        )
+        with self.assertRaises(SystemExit):
+            ek.cmd_bundle_extract(ns_x, cfg2, None)
+
+    def test_extract_install_without_bundle_dir_cleans_temp(self) -> None:
+        cfg, wd = self._cfg("src_extract_install")
+        self._seed_wrapped(cfg, wd)
+        ek.cmd_bundle_create(self._ns(archive="out/wrap.tgz"), cfg, None)
+
+        cfg2, wd2 = self._cfg("coord_extract_install")
+        before = set(wd2.iterdir())
+        ns_x = ek.argparse.Namespace(
+            archive=str(wd / "out" / "wrap.tgz"),
+            bundle_dir=None,
+            install=True,
+            dry_run=False,
+        )
+        ek.cmd_bundle_extract(ns_x, cfg2, None)
+        # the throwaway staging dir must not survive
+        leftover = [p for p in wd2.iterdir() if p.name.startswith("keyops-extract-")]
+        self.assertEqual(leftover, [], "temp extract dir must be removed")
+        # install actually distributed the wrapped shares
+        for s in (s["name"] for s in cfg2.all_services()):
+            self.assertTrue(
+                (wd2 / "wrapped-shares-coordinator" / s / "member1_eph_wrapped.share").is_file()
+            )
+        self.assertNotIn("incoming", {p.name for p in set(wd2.iterdir()) - before})
 
 
 class WrappedSharesApprovalInvariantTests(unittest.TestCase):
