@@ -122,10 +122,11 @@ The preferred invocation is the self-contained `keyops` binary (no Python
 required). On first use, fetch it with:
 
 ```bash
-curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
-curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/latest/download/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/download/v0.5.8/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/download/v0.5.8/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
 shasum -a 256 -c keyops.*.sha256
 install -m 0755 keyops.* ./bin/keyops   # or any directory on $PATH
+keyops require-version 0.5.8           # fail-loud if binary doesn't match this skill
 ```
 
 `keyops init --role share-set-member ...` auto-fetches the latest stable `qos_client` from `0xkey-io/qos` GitHub
@@ -152,6 +153,14 @@ Check the latest published version with `gh release view -R
 `git -C <skill-src> ls-remote --tags origin | tail -1`). Upgrade with
 `npx skills update 0xkey-keyops-share` (npm-style install) or
 `git -C <skill-src> pull --tags` (clone install).
+
+After upgrading the skill, update the `keyops` binary to the matching version
+and verify:
+
+```bash
+keyops fetch-keyops --release-tag v0.5.8
+keyops require-version 0.5.8
+```
 
 ## Runbook
 

@@ -73,6 +73,63 @@ wrapped-shares bundle so it can never be silently dropped again.
   the operator to confirm these values before distributing the review bundle.
   Advisory only — it never blocks the command. The example config gains a
   `$pivot_args_comment` and `coordinator.md` documents the gate.
+- **Immutable manifest-envelope baseline.** `manifest envelope` now snapshots
+  each generated `<svc>-manifest-envelope.json` to a read-only
+  `manifest/original/<svc>-manifest-envelope.json`. `ceremony boot`,
+  `ceremony attestation`, and `bundle create --kind share-request` compare the
+  working envelope against that baseline and **fail loud** on any drift. This
+  catches the production footgun where `shareSetApprovals` were hand-injected
+  into the envelope JSON and the enclave rejected it as an opaque
+  `ProtocolMsgDeserialization`. Restore the canonical file with
+  `cp manifest/original/<svc>-manifest-envelope.json <svc>-manifest-envelope.json`.
+- **`coordinator.md` "Phase 7-9: boot → post-share is ONE atomic window"
+  section.** Spells out that boot → attestation → share-request → wrapped-shares
+  → post-share is a single uninterruptible window and lists the hard "do NOT"
+  rules (no Pod delete/recreate, no probe post-share, no reusing old wrapped
+  shares, no mid-window re-envelope).
+- **Operator-prompts hygiene checks for every member.** Latest skill + `keyops`,
+  roster-assigned alias/member-index only, and current-round bundle verified
+  against its `.sha256` — the three stale-input failure modes, surfaced before
+  the member acts.
+- **`keyops require-version` binary version gate.** New subcommand
+  `keyops require-version <expected-version>` verifies that the installed binary
+  exactly matches the expected version (precise string equality). Exits 0 on
+  match, exits 2 with a platform-aware remediation command (`keyops
+  fetch-keyops --release-tag v<expected>` / pinned `curl` download) on any
+  mismatch, including `VERSION == "unknown"`. Hygiene check #1 in
+  `operator-prompts.md` now instructs members to run this command first — it
+  replaces the previous human-eyeball version comparison. All four SKILL.md
+  `## CLI and qos_client platform` blocks now pin the download URL to
+  `releases/download/v<version>/` (instead of `releases/latest/download/`), so
+  installing from the skill's own instructions produces a matching binary.
+  `sync-skills.py` keeps the pinned version string in sync with the root
+  `VERSION` file on each release (along with the inline skill version, the
+  `require-version` command, and the `fetch-keyops --release-tag` command).
+- **`--service` selector for single-service recovery.** `ceremony boot`,
+  `ceremony attestation`, `ceremony reencrypt`, `ceremony post`, `verify`, and
+  `bundle create --kind share-request` now take a repeatable `--service <name>`
+  flag. Omitting it keeps the all-five default; naming services scopes the
+  command so a single failed service (any of the five — there is nothing
+  signer-specific) can be recovered without re-booting the healthy ones. This
+  closes a real hazard: re-running the unscoped flow to fix one service would
+  re-boot the four healthy, provisioned services and wipe their in-RAM quorum
+  keys. A scoped share-request records only its subset in
+  `BUNDLE.json.services`, so install + reencrypt stay in lock-step.
+  `coordinator.md` gains a "Single-service recovery" runbook and
+  `share-set-member.md` documents `ceremony reencrypt --service`.
+
+### Changed
+
+- **`bundle extract --bundle-dir` is now optional with `--install`.** Mirrors
+  `bundle create --archive`: when installing, the extracted tree is a throwaway
+  staging dir, so `bundle extract --install --archive <tgz>` no longer needs an
+  explicit `--bundle-dir`. Without `--install` it is still required (you want a
+  persistent dir to inspect).
+- **`coordinator.md` troubleshooting table is now a decision tree** with an
+  explicit "Do NOT" column, plus new `ProtocolMsgDeserialization` (mutated
+  envelope) and `UnrecoverableError` (terminal post-share state) rows.
+- **`ceremony post` is documented as having no safe test mode** — the only
+  pre-flight is offline validation of the inputs.
 
 ### Changed (potentially breaking)
 

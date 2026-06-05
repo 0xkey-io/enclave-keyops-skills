@@ -12,6 +12,7 @@ for maintainer / CI use. See core/references/source-invocation.md.
 
 Command routing:
     keyops --version                   → prints version and exits
+    keyops require-version <ver>       → verifies binary == skill version; exits 2 on mismatch
     keyops init  <args…>               → role_init.main()
     keyops fetch-qos-client  <args…>   → fetch_qos_client.main()
     keyops fetch-keyops  <args…>       → fetch_keyops.main()
@@ -77,6 +78,74 @@ def _read_version() -> str:
 
 VERSION = _read_version()
 
+
+# ---------------------------------------------------------------------------
+# require-version gate
+# ---------------------------------------------------------------------------
+
+def _cmd_require_version(args: list[str]) -> int:
+    """Verify the running binary version matches the skill's expected version.
+
+    Usage: keyops require-version <expected-version>
+
+    Exits 0 when binary VERSION == expected-version (exact string match).
+    Exits 2 on any mismatch, printing a remediation command so the
+    operator can download the correct binary with one copy-paste.
+
+    The binary and skill MUST be the same version — a stale binary
+    re-introduces already-fixed bugs and can silently corrupt ceremony
+    outputs (e.g. wrapped-shares bundles missing the share-set approval).
+    """
+    if len(args) != 1:
+        sys.stderr.write(
+            "usage: keyops require-version <expected-version>\n"
+            "Example: keyops require-version 0.5.8\n"
+        )
+        return 2
+
+    expected = args[0].strip()
+
+    if VERSION == "unknown":
+        sys.stderr.write(
+            f"ERROR: keyops binary has no embedded VERSION; cannot verify.\n"
+            f"Download the official binary for version {expected!r}:\n"
+            f"  keyops fetch-keyops --release-tag v{expected}\n"
+        )
+        return 2
+
+    if VERSION == expected:
+        print(f"keyops {VERSION} matches skill {expected}")
+        return 0
+
+    import platform as _platform
+    _sys = _platform.system().lower()
+    _mach = _platform.machine().lower()
+    if _mach in ("arm64", "aarch64"):
+        _mach = "arm64"
+    elif _mach in ("x86_64", "amd64"):
+        _mach = "amd64"
+    _plat = f"{_sys}-{_mach}"
+
+    sys.stderr.write(
+        f"ERROR: keyops binary is version {VERSION!r} but this skill expects "
+        f"{expected!r}.\n"
+        "The binary and skill MUST be the same version — a stale binary "
+        "re-introduces already-fixed bugs and can silently corrupt ceremony "
+        "outputs.\n\n"
+        "Update keyops to the required version:\n\n"
+        f"  # Option A — built-in fetcher (recommended):\n"
+        f"  keyops fetch-keyops --release-tag v{expected}\n\n"
+        f"  # Option B — manual download:\n"
+        f"  curl -fLO https://github.com/0xkey-io/enclave-keyops-skills"
+        f"/releases/download/v{expected}/keyops.{_plat}\n"
+        f"  curl -fLO https://github.com/0xkey-io/enclave-keyops-skills"
+        f"/releases/download/v{expected}/keyops.{_plat}.sha256\n"
+        f"  shasum -a 256 -c keyops.{_plat}.sha256\n"
+        f"  install -m 0755 keyops.{_plat} ./bin/keyops\n"
+    )
+    return 2
+
+
 # ---------------------------------------------------------------------------
 # Sub-command dispatch table
 # ---------------------------------------------------------------------------
@@ -105,6 +174,9 @@ def main() -> int:
     if args and args[0] in ("--version", "-V"):
         print(f"keyops {VERSION}")
         return 0
+
+    if args and args[0] == "require-version":
+        return _cmd_require_version(args[1:])
 
     if args and args[0] in _DISPATCH:
         subcommand = args[0]

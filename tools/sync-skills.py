@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -223,6 +224,67 @@ def _sync_skill_version(
     return None
 
 
+def _sync_skill_pins(
+    skill_md: Path, version: str, *, check: bool
+) -> Optional[str]:
+    """Keep version-stamped literals in SKILL.md body in sync with VERSION.
+
+    The SKILL.md body contains four categories of version-stamped strings that
+    must all equal the root VERSION file:
+
+    1. Inline skill version mention — ``This skill is version `X.Y.Z` ``
+    2. GitHub release download URL pin — ``releases/download/vX.Y.Z/``
+       (also fixes any remaining ``releases/latest/download/`` occurrences
+       left over from before versioned pins were introduced)
+    3. ``keyops require-version X.Y.Z`` — the binary version gate
+    4. ``keyops fetch-keyops --release-tag vX.Y.Z`` — update helper
+
+    In check mode returns a drift message; in write mode rewrites in place.
+    Returns None when no drift found/fixed.
+    """
+    text = skill_md.read_text(encoding="utf-8")
+    new_text = text
+
+    # Pattern 1: This skill is version `X.Y.Z`
+    new_text = re.sub(
+        r"(This skill is version `)[\d]+\.[\d]+\.[\d]+(`)",
+        lambda m: f"{m.group(1)}{version}{m.group(2)}",
+        new_text,
+    )
+
+    # Pattern 2: releases/latest/download/ or releases/download/vX.Y.Z/
+    new_text = re.sub(
+        r"releases/(?:latest/download|download/v[\d]+\.[\d]+\.[\d]+)/",
+        f"releases/download/v{version}/",
+        new_text,
+    )
+
+    # Pattern 3: keyops require-version X.Y.Z
+    new_text = re.sub(
+        r"(keyops require-version )[\d]+\.[\d]+\.[\d]+",
+        lambda m: f"{m.group(1)}{version}",
+        new_text,
+    )
+
+    # Pattern 4: keyops fetch-keyops --release-tag vX.Y.Z
+    new_text = re.sub(
+        r"(keyops fetch-keyops --release-tag v)[\d]+\.[\d]+\.[\d]+",
+        lambda m: f"{m.group(1)}{version}",
+        new_text,
+    )
+
+    if new_text == text:
+        return None
+
+    if check:
+        return (
+            f"{skill_md.relative_to(REPO_ROOT)}: SKILL.md body has stale version "
+            f"pins (expected {version!r}); run sync-skills.py to update"
+        )
+    skill_md.write_text(new_text, encoding="utf-8")
+    return None
+
+
 def _sync_one(skill_name: str, *, check: bool, version: str) -> list[str]:
     drift: list[str] = []
     skill_dir = SKILLS / skill_name
@@ -233,6 +295,10 @@ def _sync_one(skill_name: str, *, check: bool, version: str) -> list[str]:
         return drift
 
     msg = _sync_skill_version(skill_md, version, check=check)
+    if msg is not None:
+        drift.append(msg)
+
+    msg = _sync_skill_pins(skill_md, version, check=check)
     if msg is not None:
         drift.append(msg)
 
