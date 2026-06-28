@@ -774,6 +774,15 @@ def _pivot_args_for_service(cfg: Config, svc: Mapping[str, Any]) -> str:
         return str(d["tls_fetcher_pivot_args"])
     if name == "notarizer" and d.get("notarizer_pivot_args"):
         return str(d["notarizer_pivot_args"])
+    # policy-engine needs `--parser-pubkey <hex>` so it can verify the
+    # Transaction Parser's attested `parsed_transaction` signature (the
+    # tx-send parser gate added in enclave 6882c46). It MUST NOT come from
+    # the generic `pivot_args`, which is shared with transaction-parser
+    # (which would reject the unknown flag). A dropped `--parser-pubkey`
+    # makes the policy engine fail closed on every tx-send activity with
+    # "no parser pubkey is configured".
+    if name == "policy-engine" and d.get("policy_engine_pivot_args"):
+        return str(d["policy_engine_pivot_args"])
     return str(d["pivot_args"])
 
 
