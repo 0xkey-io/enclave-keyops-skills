@@ -13,6 +13,29 @@ If only a `linux/amd64` client is available, use a controlled wrapper such as
 mounting only the required workdir / key-vault paths. Record the SHA256 of the
 actual executable path or wrapper being used in the role config.
 
+## Bound macOS cold start
+
+Before depending on a local macOS `keyops` or `qos_client`, run a bounded cold
+start. On Homebrew systems use `gtimeout` from GNU coreutils, for example:
+
+```bash
+gtimeout 8 keyops --version
+```
+
+Exit `124` is `KEYOPS_START_TIMEOUT`, not an invitation to launch the binary
+again without a bound. For staging, continue through the authoritative GitOps
+runbook. If local break-glass execution is actually required, use a verified
+matching release on a supported Linux operator environment. Never substitute a
+wrong-architecture binary or relax its SHA/version checks to get past a macOS
+loader stall.
+
+If unrelated CLIs also time out and a process sample is blocked below
+`dyld4::APIs::dlopen` in `fcntl`, treat it as a macOS loader/security-service
+incident. Stop reinstalling individual applications, restart macOS normally,
+and re-run bounded probes. Do not disable SIP, Gatekeeper, or AMFI. If the
+signature persists, use the supported Linux operator environment and escalate
+with a sysdiagnose.
+
 ## When to update `qos_client`
 
 See `SECURITY.md` section 3 for the authoritative replacement rules. Quick

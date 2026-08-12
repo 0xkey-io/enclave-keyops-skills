@@ -500,6 +500,28 @@ class LinkResolutionTests(unittest.TestCase):
                     )
 
 
+class CoordinatorStagingRoutingTests(unittest.TestCase):
+    """Staging must route to the dedicated GitOps owner before ceremony code.
+
+    These strings are deliberately exact: changing or deleting the routing
+    contract should require an explicit review rather than silently reverting
+    agents to local ceremony discovery.
+    """
+
+    def test_staging_uses_authoritative_gitops_runbook(self) -> None:
+        text = _read(CORE / "references" / "roles" / "coordinator.md")
+        self.assertIn("repos/enclave-staging-ops/README.md", text)
+        self.assertIn("deploy/staging.yaml", text)
+        self.assertIn("GitOps", text)
+        self.assertIn("break-glass", text)
+
+    def test_macos_cold_start_is_bounded(self) -> None:
+        text = _read(CORE / "references" / "qos-client-platform.md")
+        self.assertIn("gtimeout", text)
+        self.assertIn("KEYOPS_START_TIMEOUT", text)
+        self.assertIn("supported Linux operator environment", text)
+
+
 class SyncCheckTests(unittest.TestCase):
     """`tools/sync-skills.py --check` must succeed on a clean tree, proving
     each role skill's contents are byte-identical to `core/`."""
