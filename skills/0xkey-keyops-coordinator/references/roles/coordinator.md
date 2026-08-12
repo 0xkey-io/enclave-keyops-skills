@@ -5,6 +5,20 @@ Coordinator, ceremony operator, or the person applying manifests to EKS.
 
 This is the only KeyOps role that should need AWS/EKS/kubectl access.
 
+## Staging routing — GitOps before local ceremony
+
+When the target is the 0xkey **staging** Enclave and the workspace contains
+`repos/enclave-staging-ops/README.md`, that repository is authoritative. Read
+the README first, run the workspace `scripts/staging-ops-doctor.sh`, and use the
+`deploy/staging.yaml` one-file / one-PR GitOps contract. Its plan workflow
+generates the review material; merging invokes the apply workflow and is the
+human destructive gate. Do not start with the generic local ceremony below.
+
+Local KeyOps for staging is **break-glass only**. It must not bypass the GitOps
+plan, review, or merge gate. If the workspace runbook is absent, stop and ask
+for the exact staging operations repository rather than guessing an overlay or
+reconstructing a ceremony from local artifacts.
+
 ## Goal
 
 Create canonical five-service manifests, distribute review/share-request
@@ -43,6 +57,10 @@ Stop for user input only when required artifacts are missing, legacy/duplicate
 materials require confirmation, the K8s context is not explicitly allowed, or a
 human gate is reached (`kubectl apply`, `boot-standard`, `post-share`, unsafe
 skips).
+
+For staging, the GitOps routing rule above takes priority over this generic
+execution style. A PR merge that triggers the staging apply workflow is a human
+gate; do not merge it without explicit authorization.
 
 ## Access Scope
 
