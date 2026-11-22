@@ -3,8 +3,8 @@
 """PyInstaller spec for the keyops self-contained binary.
 
 The resulting binary bundles a full Python 3.12 interpreter together with
-enclave_keyops.py, role_init.py, fetch_qos_client.py, fetch_keyops.py,
-and keyops_main.py. Callers need no Python runtime on their machine.
+enclave_keyops.py, manifest_check.py, role_init.py, fetch_qos_client.py,
+fetch_keyops.py, and keyops_main.py. Callers need no Python runtime on their machine.
 
 Build (from repo root):
     pip install pyinstaller
@@ -47,6 +47,7 @@ a = Analysis(  # noqa: F821  (Analysis is injected by PyInstaller)
         "role_init",
         "fetch_qos_client",
         "fetch_keyops",
+        "manifest_check",
     ],
     hookspath=[],
     hooksconfig={},

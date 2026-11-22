@@ -22,6 +22,11 @@ then wait for the user to confirm or override it:
 - Manifest Set member: `~/.0xkey-ops/manifest-set/<alias>`
 - Share Set member: `~/.0xkey-ops/share-set/<alias>`
 
+If the operator already keeps one workdir per ceremony (for example
+`<ops-root>/<ceremony-id>/<role>`), recommend the next directory in that
+scheme instead and keep earlier ceremony directories read-only: their
+envelopes, approvals and audit logs are the record of what is deployed.
+
 For Manifest / Share roles, only fill `<alias>` after the Coordinator roster
 backs it. If the alias is not known yet, show the placeholder path and ask for
 `member-roster.json` (or a Coordinator-signed roster announcement) first.
@@ -31,6 +36,15 @@ directories, previous build outputs, or unrelated role directories to "find"
 key material or bundles. If such files are discovered while diagnosing a
 problem, report them as possible legacy material and ask before importing or
 copying.
+
+The one sanctioned way to carry public quorum material into a new ceremony is
+the Coordinator's `workspace seed --from <previous coordinator workdir>`, with
+the path named by the operator (never discovered by the agent). It copies a
+fixed allowlist of public files, refuses symlinks and key-like files, and
+records provenance. Reading a previous ceremony's deployed manifests for
+`manifest check --live-dir` is likewise allowed only for a path the operator
+names. Never point a new ceremony's `config.json` paths straight at another
+ceremony's directory.
 
 Every role response should first classify the workspace state and then
 recommend the next action. At minimum report:

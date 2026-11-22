@@ -293,12 +293,14 @@ Before running commands, inspect only `$WORKDIR` and classify:
 | State | Directory evidence | Next action |
 |-------|--------------------|-------------|
 | `uninitialized` | missing `config.json` | run `keyops init` with account/region/cluster |
+| `waiting-for-seed` | follow-up ceremony (quorum key already exists), `config.json` present but no `shared/quorum_key.pub` / set dirs and no `seed-provenance.json` | ask the operator for the exact previous Coordinator workdir, then `workspace seed --from <path>` (see `Follow-up ceremony`) |
 | `waiting-for-qos-client` | missing `shared/qos_client` or `config.json.qos_client_sha256_expected` | re-run `keyops init` (default = auto-fetch latest from `0xkey-io/qos`, the same channel Builder publishes to); on offline machines run `keyops fetch-qos-client --release-tag latest --out $WORKDIR/shared/qos_client`, then re-run `keyops init --force` to record the verified hash. Do NOT download from random mirrors and do NOT reuse a different ceremony's binary. |
 | `missing-roster` | no `shared/member-roster.json` or it doesn't list every set member | publish or update the roster (see `Alias / member-index assignment`); members must not submit `.pub` files until roster exists |
 | `collecting-genesis-materials` | roster published but missing current-round public-key sets, `quorum_threshold`, PCR3 preimage, or `shared/dr-key.pub` | ask for exact member `.pub` paths (filename = roster alias + `.pub`), the DR public key, or current-round inbox files |
 | `waiting-for-builder-artifacts` | public-key sets exist, missing qOS PCR, pivots, pivot hashes, or images.json | ask Builder for handoff artifacts |
 | `ready-for-genesis` | public-key sets, thresholds, DR pub, qos_client all present, no `shared/quorum_key.pub` yet | run `ceremony genesis-boot`, then bundle and ship `genesis-output` to Share members |
 | `ready-for-manifest` | public-key sets, Builder artifacts, and `shared/quorum_key.pub` are present | run doctor, nonce checks, then manifest generation |
+| `waiting-for-manifest-check` | `manifest/*-manifest.json` exist but no passing `manifest/manifest-check.json` | run `manifest check` (with `--live-dir` for follow-up ceremonies); do not build the review bundle until it passes |
 | `waiting-for-approvals` | review bundle exists, not enough approvals | wait for Manifest Set member approval bundles |
 | `ready-for-deploy` | manifest envelopes exist | render/apply only after user confirmation |
 | `waiting-for-wrapped-shares` | share-request exists, wrapped shares missing | wait for Share Set member wrapped-shares bundles |
@@ -386,8 +388,11 @@ Before generating manifests, ensure:
 - `shared/patch-set/quorum_threshold` exists. If the patch-set is disabled,
   create the file with content `0`.
 - **env-specific pivot args are confirmed by the operator.** pivot args
-  (`defaults.{pivot_args,signer_pivot_args,tls_fetcher_pivot_args,notarizer_pivot_args}`)
-  are baked into the attested manifest. The values that vary per environment are
+  (`services[].pivot_args` when set, otherwise
+  `defaults.{signer,policy_engine,tls_fetcher,notarizer}_pivot_args`, otherwise
+  `defaults.pivot_args`) are baked into the attested manifest. Prefer the
+  per-service `services[].pivot_args` when a release adds service-specific
+  flags; it is the only form that never falls back to a shared default. The values that vary per environment are
   the **notarizer recipient pubkey** and the **signer + tls-fetcher email
   parameters**. `manifest generate` prints the effective `--pivot-args` for every
   service and a reminder block before it runs — read it, and explicitly ask the
@@ -414,6 +419,41 @@ Generate canonical manifests:
 keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
   manifest generate
 ```
+
+`manifest generate` ends by printing each service's manifest hash
+(sha256 of the borsh encoding — the exact value every `approve-manifest`
+signature covers)
+and writes it to `manifest/manifest-hashes.json`.
+
+Then gate the review bundle on an offline check. It re-derives every manifest
+field from the workspace inputs — namespace, nonce, quorum key, pivot hash
+(and `sha256(pivot binary)` when `pivots_dir` holds the binaries), pivot args,
+restart / bridge / debug mode, all three sets, PCR0-2 from
+`qos-release/nitro.pcrs`, PCR3 from the preimage — and exits 1 on any FAIL:
+
+```bash
+keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
+  manifest check \
+  --live-dir <dir with the currently deployed manifests or envelopes> \
+  --forbid-arg=--<flag that must never reach this environment>
+```
+
+- `--live-dir` (follow-up ceremonies): requires `nonce = live + --nonce-delta`
+  (default 1) and an unchanged quorum key, manifest / share / patch set,
+  namespace, and PCR3. A planned change (e.g. a set rotation) needs an explicit
+  `--allow-live-diff <field>`, which downgrades only that field to WARN. The
+  per-flag pivot-arg delta, pivot-hash change and PCR0/1/2 change against live
+  are listed as `INFO` rows: show them to the operator and to signers — they
+  are exactly what the new manifest changes.
+- `--expected-hashes <json>`: `{"<service>": "<sha256>"}` from an independent
+  rehearsal; any difference is a FAIL.
+- Flag values that start with `--` must use the `=` form
+  (`--forbid-arg=--some-flag`).
+
+The full table and hashes land in `manifest/manifest-check.json`; include the
+hash table in the message that ships the review bundle (and in the ceremony
+record): it pins exactly which manifests were reviewed, so a later regenerate
+or a tampered bundle shows up as a different hash.
 
 Create and distribute review bundle:
 
@@ -612,6 +652,49 @@ those containers may be minimal images without shell tooling. Use the skill
 `verify` command, which performs temporary `kubectl port-forward` checks from
 outside the containers, or use an explicit jumpbox / local port-forward fallback
 with equivalent HTTP checks.
+
+## Follow-up ceremony (existing quorum key)
+
+A pivot / qOS upgrade keeps the quorum key, the sets and the roster; only the
+Builder artifacts, pivot args and nonces change. Run it in a **fresh
+per-ceremony workdir** (for example `<ops-root>/<ceremony-id>/coordinator`),
+never inside the previous ceremony's workdir: the previous envelopes, approvals
+and audit log are the record of what is deployed and must stay untouched.
+
+The previous workdir is the only valid source of the public quorum material,
+and only when the operator names it. Do not search for it.
+
+| # | Step | Who | Command / gate |
+|---|------|-----|----------------|
+| 1 | Create the new workdir | agent, after the operator confirms the path | `keyops init --role coordinator ...` |
+| 2 | Inherit public quorum material | agent, `--from` given by the operator | `workspace seed --from <previous coordinator workdir>` |
+| 3 | Place Builder outputs (qos-release, pivots, pivot hashes) | agent, from the Builder handoff paths | copy into `shared/`; verify against the handoff SHA256s |
+| 4 | Set pivot args | agent drafts, **operator confirms** env-specific values | edit `services[].pivot_args` |
+| 5 | Generate + check | agent | `manifest generate`, `manifest check --live-dir ...` (must PASS) |
+| 6 | Review bundle | agent builds, operator ships | `bundle create --kind review` + hash table |
+| 7 | Approvals | **each Manifest Set member, in their own workspace** | `0xkey-keyops-manifest` |
+| 8 | Envelopes | agent, **typed confirmation** | `manifest envelope` |
+| 9 | Deploy / boot / post | agent, **each human gate in `SECURITY.md §4`** | `deploy apply`, `ceremony boot`, `ceremony post` or `key-forward *`, `verify` |
+
+`workspace seed` copies only `quorum_key.pub`, `pcr3-preimage.txt`,
+`member-roster.json`, `dr-key.pub` and each set's `*.pub` + `quorum_threshold`.
+It refuses symlinks, key-like files (`.secret`, `.share`, `.pem`, `.key`,
+`.seed`) and occupied destinations with different content, sets every
+`manifest_nonce` to the previously enveloped nonce + `--nonce-bump` (default 1),
+and records source path + SHA256 of every file in `seed-provenance.json`. Use
+`--dry-run` first to show the operator the copy plan.
+
+The previous workdir's nonces are only what *that* workdir enveloped. Always
+confirm them against what is actually deployed with `manifest check
+--live-dir`; that check, not the seed, is the nonce gate.
+
+### Pre-staged rollback set
+
+To keep a signed way back to the currently deployed pivots, generate a second
+manifest set in a second workdir: `workspace seed --nonce-bump 2`, the
+**live** qos-release / pivot hashes / pivot args, then `manifest check
+--live-dir ... --nonce-delta 2`. It goes through the same review / approve /
+envelope path, so it is ready if the upgrade has to be rolled back.
 
 ## Single-service recovery
 

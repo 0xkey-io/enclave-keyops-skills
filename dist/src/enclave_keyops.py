@@ -23,6 +23,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import manifest_check  # noqa: E402
+
 # Substring markers used to recognize a CLI flag whose companion VALUE
 # should be redacted from audit logs (e.g. `--secret-path`, `--share-path`,
 # `--master-seed-path`). Matching is intentionally restricted to tokens
@@ -767,6 +771,8 @@ def _manifest_dirs(cfg: Config) -> Tuple[Path, Path, Path]:
 
 def _pivot_args_for_service(cfg: Config, svc: Mapping[str, Any]) -> str:
     name = svc["name"]
+    if svc.get("pivot_args"):
+        return str(svc["pivot_args"])
     d = cfg.raw["defaults"]
     if name == "signer" and d.get("signer_pivot_args"):
         return str(d["signer_pivot_args"])
@@ -1085,6 +1091,294 @@ def cmd_manifest_generate(ns: argparse.Namespace, cfg: Config, audit_log: Option
         print(f"== generate-manifest {svc['name']}")
         run_process(argv, dry_run=ns.dry_run, cwd=cfg.workdir, audit_log=audit_log)
         audit_file_hash(audit_log, mpath)
+    if not ns.dry_run:
+        write_manifest_hashes(cfg, audit_log)
+
+
+MANIFEST_HASHES_FILE = "manifest-hashes.json"
+
+
+def write_manifest_hashes(cfg: Config, audit_log: Optional[Path]) -> Dict[str, str]:
+    """Print and persist sha256(borsh) per service — the hash every approval signs."""
+    mroot = resolve_path(cfg.workdir, cfg.paths()["workdir_manifest_subdir"])
+    hashes: Dict[str, str] = {}
+    for svc in cfg.all_services():
+        mpath = mroot / f"{svc['name']}-manifest.json"
+        if not mpath.is_file():
+            continue
+        try:
+            m = manifest_check.load_manifest(mpath)
+        except (manifest_check.ManifestFormatError, KeyError, TypeError) as e:
+            sys.stderr.write(f"{svc['name']}: cannot hash {mpath}: {e}\n")
+            raise SystemExit(1)
+        hashes[svc["name"]] = m["manifest_sha256"]
+    out = mroot / MANIFEST_HASHES_FILE
+    out.write_text(json.dumps(hashes, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    audit_file_hash(audit_log, out)
+    print("manifest hashes (sha256 of borsh; the value each approve-manifest signature covers):")
+    for name, h in hashes.items():
+        print(f"  {name:20} {h}")
+    return hashes
+
+
+def _pivot_binary_sha256(cfg: Config, svc: Mapping[str, Any]) -> Optional[str]:
+    pivots_dir = cfg.paths().get("pivots_dir")
+    if not pivots_dir:
+        return None
+    p = resolve_path(cfg.workdir, pivots_dir) / str(svc["pivot_binary_name"])
+    return sha256_file(p) if p.is_file() else None
+
+
+def _load_expected_hashes(path: Path) -> Dict[str, str]:
+    raw = load_json(path)
+    if not isinstance(raw, dict) or not all(isinstance(v, str) for v in raw.values()):
+        sys.stderr.write(f"{path}: expected a JSON object of service -> sha256 hex\n")
+        raise SystemExit(2)
+    return {k: v.lower() for k, v in raw.items()}
+
+
+def cmd_manifest_check(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
+    """Offline gate between `manifest generate` and the review bundle.
+
+    Re-derives every manifest field from the workspace inputs (config, quorum
+    key, set directories, pivot hashes, qos-release PCRs) and, with
+    `--live-dir`, checks the follow-up invariants against the currently
+    deployed manifests: same quorum identity, nonce = live + delta.
+    Exit 1 on any FAIL; nothing here touches the network or a cluster.
+    """
+    paths = cfg.paths()
+    mroot = resolve_path(cfg.workdir, paths["workdir_manifest_subdir"])
+    ms, ss, ps = _manifest_dirs(cfg)
+    qkp = resolve_path(cfg.workdir, paths["quorum_key_pub_path"])
+    hashes_dir = resolve_path(cfg.workdir, paths["pivot_hashes_dir"])
+    qos_release = resolve_path(cfg.workdir, paths["qos_release_dir"])
+    require_file(qkp, "quorum key pub")
+    require_file(qos_release / "nitro.pcrs", "qos-release nitro.pcrs")
+    quorum_key = manifest_check.read_hex_file(qkp, str(qkp))
+    sets = {
+        "manifest_set": manifest_check.read_set_dir(ms),
+        "share_set": manifest_check.read_set_dir(ss),
+        "patch_set": manifest_check.read_set_dir(ps),
+    }
+    pcrs = manifest_check.read_nitro_pcrs(qos_release / "nitro.pcrs")
+    pcr3_pre = resolve_path(cfg.workdir, paths["pcr3_preimage_path"])
+    require_file(pcr3_pre, "pcr3 preimage")
+    pcr3 = manifest_check.pcr3_from_preimage(pcr3_pre)
+    defs = cfg.raw["defaults"]
+    bridge = [
+        (str(b.get("type", "")).lower(), int(b["port"]), b.get("host"))
+        for b in json.loads(str(defs["bridge_config_json"]))
+    ]
+    expected_hashes = _load_expected_hashes(Path(ns.expected_hashes)) if ns.expected_hashes else {}
+    live_dir = Path(ns.live_dir).expanduser().resolve() if ns.live_dir else None
+    if live_dir is not None and not live_dir.is_dir():
+        sys.stderr.write(f"--live-dir is not a directory: {live_dir}\n")
+        raise SystemExit(2)
+
+    rep = manifest_check.Report()
+    hashes: Dict[str, str] = {}
+    for svc in selected_services(cfg, ns):
+        name = svc["name"]
+        mpath = mroot / f"{name}-manifest.json"
+        if not mpath.is_file():
+            rep.add("FAIL", name, "file", f"missing {mpath}")
+            continue
+        try:
+            m = manifest_check.load_manifest(mpath)
+        except (manifest_check.ManifestFormatError, KeyError, TypeError) as e:
+            rep.add("FAIL", name, "parse", str(e))
+            continue
+        hash_file = hashes_dir / f"{svc['pivot_binary_name']}-pivot-hash.txt"
+        if not hash_file.is_file():
+            rep.add("FAIL", name, "pivot_hash file", f"missing {hash_file}")
+            continue
+        manifest_check.check_service(
+            rep,
+            name,
+            m,
+            namespace=str(svc["manifest_namespace"]),
+            nonce=int(svc["manifest_nonce"]),
+            quorum_key=quorum_key,
+            pivot_hash=manifest_check.read_hex_file(hash_file, str(hash_file)),
+            pivot_binary_sha256=_pivot_binary_sha256(cfg, svc),
+            args=manifest_check.parse_pivot_args(_pivot_args_for_service(cfg, svc)),
+            restart=str(defs["restart_policy"]),
+            debug_mode=bool(defs.get("debug_mode_manifest")),
+            bridge_config=bridge,
+            manifest_set=sets["manifest_set"],
+            share_set=sets["share_set"],
+            patch_set=sets["patch_set"],
+            pcrs=pcrs,
+            pcr3=pcr3,
+            forbidden_args=ns.forbid_arg or (),
+        )
+        if live_dir is not None:
+            try:
+                lp = manifest_check.find_live_manifest(live_dir, str(svc["manifest_namespace"]))
+            except manifest_check.ManifestFormatError as e:
+                rep.add("FAIL", name, "live", str(e))
+                lp = None
+            if lp is None:
+                rep.add("FAIL", name, "live", f"no manifest for {svc['manifest_namespace']} in {live_dir}")
+            else:
+                manifest_check.check_against_live(
+                    rep,
+                    name,
+                    m,
+                    manifest_check.load_manifest(lp),
+                    nonce_delta=ns.nonce_delta,
+                    allow_diff=ns.allow_live_diff or (),
+                )
+        if name in expected_hashes:
+            rep.eq(name, "manifest_sha256=expected", expected_hashes[name], m["manifest_sha256"])
+        hashes[name] = m["manifest_sha256"]
+
+    print(rep.render())
+    print("\nmanifest hashes (sha256 of borsh):")
+    for name, h in hashes.items():
+        print(f"  {name:20} {h}")
+    result = {
+        "result": "FAIL" if rep.failures else "PASS",
+        "live_dir": str(live_dir) if live_dir else None,
+        "nonce_delta": ns.nonce_delta if live_dir else None,
+        "manifest_sha256": hashes,
+        "rows": rep.rows,
+    }
+    out = Path(ns.json_out) if ns.json_out else mroot / "manifest-check.json"
+    out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    audit_file_hash(audit_log, out)
+    if rep.failures:
+        print(f"\nmanifest check: FAIL ({len(rep.failures)} failing checks) — do not create the review bundle")
+        raise SystemExit(1)
+    print("\nmanifest check: PASS")
+
+
+# Public material a follow-up ceremony may inherit from the previous
+# Coordinator workdir. Anything else (qos-release, pivots, pivot hashes) is a
+# new Builder output for the new ceremony and must not be carried over.
+SEED_FILES = ("quorum_key_pub_path", "pcr3_preimage_path", "member_roster_path", "dr_key_pub_path")
+SEED_SET_DIRS = ("manifest_set_dir", "share_set_dir", "patch_set_dir")
+SEED_FORBIDDEN_SUFFIXES = (".secret", ".share", ".pem", ".key", ".seed")
+
+
+def _join_nofollow(workdir: Path, p: str) -> Path:
+    # resolve_path() follows symlinks; seeding must see them to refuse them.
+    pp = Path(p).expanduser()
+    return Path(os.path.abspath(pp if pp.is_absolute() else workdir / pp))
+
+
+def _seed_plan(src_cfg: Config, dst_cfg: Config) -> List[Tuple[Path, Path]]:
+    plan: List[Tuple[Path, Path]] = []
+    for key in SEED_FILES:
+        if key not in src_cfg.paths() or key not in dst_cfg.paths():
+            continue
+        src = _join_nofollow(src_cfg.workdir, src_cfg.paths()[key])
+        if src.exists() or src.is_symlink():
+            plan.append((src, _join_nofollow(dst_cfg.workdir, dst_cfg.paths()[key])))
+    for key in SEED_SET_DIRS:
+        src_dir = _join_nofollow(src_cfg.workdir, src_cfg.paths()[key])
+        dst_dir = _join_nofollow(dst_cfg.workdir, dst_cfg.paths()[key])
+        if src_dir.is_symlink() or dst_dir.is_symlink():
+            bad = src_dir if src_dir.is_symlink() else dst_dir
+            sys.stderr.write(f"workspace seed refused: set directory is a symlink: {bad}\n")
+            raise SystemExit(2)
+        if not src_dir.is_dir():
+            continue
+        for p in sorted(src_dir.iterdir()):
+            if p.name.endswith(".pub") or p.name == "quorum_threshold":
+                plan.append((p, dst_dir / p.name))
+    return plan
+
+
+def _previous_nonces(src_cfg: Config) -> Dict[str, int]:
+    """Nonce of what was actually enveloped last time; falls back to the old config."""
+    mroot = resolve_path(src_cfg.workdir, src_cfg.paths()["workdir_manifest_subdir"])
+    out: Dict[str, int] = {}
+    for svc in src_cfg.all_services():
+        env = mroot / f"{svc['name']}-manifest-envelope.json"
+        if env.is_file():
+            out[svc["name"]] = manifest_check.load_manifest(env)["nonce"]
+        elif svc.get("manifest_nonce") is not None:
+            out[svc["name"]] = int(svc["manifest_nonce"])
+    return out
+
+
+def cmd_workspace_seed(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
+    """Start a follow-up ceremony from an explicitly named previous Coordinator workdir.
+
+    Copies only public quorum material, refuses symlinks / key-like files /
+    conflicting occupied paths, bumps every manifest_nonce, and records the
+    provenance (source path + sha256 per file) in seed-provenance.json.
+    """
+    src_root = Path(ns.from_workdir).expanduser().resolve()
+    src_cfg_path = src_root / "config.json"
+    require_file(src_cfg_path, "previous Coordinator config.json")
+    if src_root == cfg.workdir:
+        sys.stderr.write("--from must be a different (previous) Coordinator workdir\n")
+        raise SystemExit(2)
+    src_cfg = Config(load_json(src_cfg_path), workdir=src_root)
+    validate_config(src_cfg)
+    if cfg.config_path is None:
+        sys.stderr.write("workspace seed needs a writable --config path\n")
+        raise SystemExit(2)
+
+    plan = _seed_plan(src_cfg, cfg)
+    problems: List[str] = []
+    for src, dst in plan:
+        if src.is_symlink():
+            problems.append(f"refusing symlink: {src}")
+        elif not src.is_file():
+            problems.append(f"not a regular file: {src}")
+        if src.name.lower().endswith(SEED_FORBIDDEN_SUFFIXES):
+            problems.append(f"refusing key-like file: {src}")
+        if dst.is_symlink():
+            problems.append(f"destination is a symlink: {dst}")
+        elif dst.exists() and (not dst.is_file() or sha256_file(dst) != sha256_file(src)):
+            problems.append(f"destination occupied with different content: {dst}")
+    nonces = _previous_nonces(src_cfg)
+    missing = [s["name"] for s in cfg.all_services() if s["name"] not in nonces]
+    if missing:
+        problems.append(f"cannot determine previous manifest_nonce for: {missing}")
+    if problems:
+        sys.stderr.write("workspace seed refused:\n" + "".join(f"  - {p}\n" for p in problems))
+        raise SystemExit(2)
+
+    print(f"seed source: {src_root}")
+    for src, dst in plan:
+        rel_src = src.relative_to(src_root) if src.is_relative_to(src_root) else src
+        rel_dst = dst.relative_to(cfg.workdir) if dst.is_relative_to(cfg.workdir) else dst
+        print(f"  copy {rel_src} -> {rel_dst}")
+    for s in cfg.all_services():
+        print(f"  manifest_nonce {s['name']}: {nonces[s['name']]} -> {nonces[s['name']] + ns.nonce_bump}")
+    if ns.dry_run:
+        print("dry-run: nothing written")
+        return
+
+    provenance: Dict[str, Any] = {
+        "source_workdir": str(src_root),
+        "source_config_sha256": sha256_file(src_cfg_path),
+        "nonce_bump": ns.nonce_bump,
+        "previous_nonces": nonces,
+        "files": [],
+    }
+    for src, dst in plan:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if not dst.exists():
+            shutil.copyfile(src, dst)
+        provenance["files"].append({"source": str(src), "dest": str(dst), "sha256": sha256_file(dst)})
+        audit_file_hash(audit_log, dst)
+    for s in cfg.raw["services"]:
+        s["manifest_nonce"] = nonces[s["name"]] + ns.nonce_bump
+    cfg.config_path.write_text(json.dumps(cfg.raw, indent=2) + "\n", encoding="utf-8")
+    audit_file_hash(audit_log, cfg.config_path)
+    prov_path = cfg.workdir / "seed-provenance.json"
+    prov_path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+    audit_file_hash(audit_log, prov_path)
+    print(f"seeded {len(plan)} public files; provenance: {prov_path}")
+    print(
+        "next: place this ceremony's Builder outputs (qos-release, pivots, pivot hashes), "
+        "confirm env-specific pivot args, then `manifest generate` + `manifest check --live-dir`."
+    )
 
 
 def cmd_manifest_approve(ns: argparse.Namespace, cfg: Config, audit_log: Optional[Path]) -> None:
@@ -2651,6 +2945,55 @@ def build_parser() -> argparse.ArgumentParser:
     apr.set_defaults(handler="manifest_apr")
     env = ms.add_parser("envelope")
     env.set_defaults(handler="manifest_env")
+    mchk = ms.add_parser(
+        "check",
+        help="offline check of generated manifests against workspace inputs (and live manifests)",
+    )
+    _add_service_selector(mchk)
+    mchk.add_argument(
+        "--live-dir",
+        default=None,
+        help="directory with the currently deployed manifests/envelopes (matched by namespace)",
+    )
+    mchk.add_argument(
+        "--nonce-delta",
+        type=int,
+        default=1,
+        help="required nonce - live nonce (default 1; e.g. 2 for a pre-staged rollback set)",
+    )
+    mchk.add_argument(
+        "--allow-live-diff",
+        action="append",
+        choices=manifest_check.LIVE_INVARIANTS,
+        help="downgrade one live invariant to WARN (e.g. a planned set rotation); repeatable",
+    )
+    mchk.add_argument(
+        "--forbid-arg",
+        action="append",
+        help="pivot flag that must not appear in any manifest; repeatable",
+    )
+    mchk.add_argument(
+        "--expected-hashes",
+        default=None,
+        help="JSON object service -> expected sha256(borsh), e.g. from an independent rehearsal",
+    )
+    mchk.add_argument("--json-out", default=None, help="default: <manifest dir>/manifest-check.json")
+    mchk.set_defaults(handler="manifest_chk")
+
+    ws = subs.add_parser("workspace")
+    wss = ws.add_subparsers(dest="wscmd", required=True)
+    wseed = wss.add_parser(
+        "seed",
+        help="seed a follow-up Coordinator workdir with public quorum material from a previous one",
+    )
+    wseed.add_argument(
+        "--from",
+        dest="from_workdir",
+        required=True,
+        help="previous Coordinator workdir (contains config.json); must be given explicitly by the operator",
+    )
+    wseed.add_argument("--nonce-bump", type=int, default=1)
+    wseed.set_defaults(handler="ws_seed")
 
     d = subs.add_parser("deploy")
     ds = d.add_subparsers(dest="depcmd", required=True)
@@ -2904,6 +3247,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "manifest_gen": lambda: cmd_manifest_generate(ns, cfg, audit),
         "manifest_apr": lambda: cmd_manifest_approve(ns, cfg, audit),
         "manifest_env": lambda: cmd_manifest_envelope(ns, cfg, audit),
+        "manifest_chk": lambda: cmd_manifest_check(ns, cfg, audit),
+        "ws_seed": lambda: cmd_workspace_seed(ns, cfg, audit),
         "dep_render": lambda: cmd_deploy_render(ns, cfg, audit),
         "dep_apply": lambda: cmd_deploy_apply(ns, cfg, audit),
         "cer_genesis_boot": lambda: cmd_ceremony_genesis_boot(ns, cfg, audit),

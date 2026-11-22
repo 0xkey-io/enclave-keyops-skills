@@ -32,6 +32,46 @@ step before re-running ceremony commands.
 
 ---
 
+## Unreleased
+
+Make follow-up ceremonies (pivot / qOS upgrade on an existing quorum key)
+runnable end-to-end through `keyops`, with an offline gate before the review
+bundle. No migration needed; existing configs keep working.
+
+### Added
+
+- **`manifest check`** (Coordinator): offline check of every generated
+  manifest against the workspace inputs — namespace, nonce, quorum key, pivot
+  hash (+ `sha256(pivot binary)` when present), pivot args, restart / bridge /
+  debug mode, manifest / share / patch set, PCR0-2 from `nitro.pcrs`, PCR3 from
+  the preimage. `--live-dir` adds the follow-up invariants against the deployed
+  manifests (nonce = live + `--nonce-delta`, unchanged quorum key / sets /
+  namespace / PCR3; `--allow-live-diff` for planned changes) and lists the
+  pivot-arg / pivot-hash / PCR delta for review. `--forbid-arg` and
+  `--expected-hashes` add hard gates. Exit 1 on any failure; report in
+  `manifest/manifest-check.json`.
+- **Manifest hash table**: `manifest generate` prints and writes
+  `manifest/manifest-hashes.json` (sha256 of the borsh encoding, the value every
+  approval signs).
+- **`workspace seed --from <previous coordinator workdir>`**: carries the public
+  quorum material (quorum key, PCR3 preimage, roster, DR pub, set `*.pub` +
+  thresholds) into a fresh per-ceremony workdir, refuses symlinks / key-like
+  files / conflicting destinations, bumps every `manifest_nonce`, and records
+  provenance in `seed-provenance.json`.
+- **Per-service `services[].pivot_args`** overrides the shared defaults, so a
+  release that adds service-specific flags no longer depends on the
+  name-keyed `defaults.*_pivot_args` fallbacks.
+
+### Docs
+
+- Coordinator runbook: `Follow-up ceremony` section (who runs what, human
+  gates, pre-staged rollback set) and new `waiting-for-seed` /
+  `waiting-for-manifest-check` states.
+- Workspace rules: per-ceremony workdirs; `workspace seed` is the only
+  sanctioned way to reuse a previous ceremony's public material.
+
+---
+
 ## 0.5.8 — 2026-06-04
 
 Hardening round: make the share-set approval a non-optional invariant of the

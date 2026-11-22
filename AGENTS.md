@@ -76,6 +76,7 @@ dist/                    ← keyops binary build system (maintainer only)
     role_init.py
     fetch_keyops.py
     fetch_qos_client.py
+    manifest_check.py
   keyops.spec
   build.sh
 

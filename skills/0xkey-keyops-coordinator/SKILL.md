@@ -59,7 +59,8 @@ Coordinator agents invoke `keyops` subcommands (the self-contained binary
 — no Python runtime required):
 
 - `doctor coordinator`
-- `manifest generate` / `manifest envelope`
+- `manifest generate` / `manifest check` / `manifest envelope`
+- `workspace seed` (follow-up ceremony; `--from` only with a path the operator names)
 - `deploy render` / `deploy apply`
 - `ceremony genesis-boot`
 - `ceremony boot` / `ceremony attestation`
