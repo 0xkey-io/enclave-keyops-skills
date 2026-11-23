@@ -450,10 +450,13 @@ keyops --config "$WORKDIR/config.json" --workdir "$WORKDIR" \
 - Flag values that start with `--` must use the `=` form
   (`--forbid-arg=--some-flag`).
 
-The full table and hashes land in `manifest/manifest-check.json`; include the
-hash table in the message that ships the review bundle (and in the ceremony
-record): it pins exactly which manifests were reviewed, so a later regenerate
-or a tampered bundle shows up as a different hash.
+The full table and hashes land in `manifest/manifest-check.json`. Send the hash
+table to every Manifest Set member through a channel other than the one that
+carries the review bundle, and keep it in the ceremony record.
+`approve-manifest` does not display the hash, so each member recomputes it
+locally (`qos_client json-to-borsh` + `shasum -a 256`, see the Manifest Set
+runbook) before approving; a regenerated or tampered manifest shows up there
+as a different hash.
 
 Create and distribute review bundle:
 

@@ -1,6 +1,6 @@
 ---
 name: 0xkey-keyops-share
-version: 0.5.9
+version: 0.5.10
 description: >-
   Provides 0xkey enclave KeyOps runbook for the Share Set member role:
   verifying a Coordinator-issued share-request bundle, running
@@ -122,11 +122,11 @@ The preferred invocation is the self-contained `keyops` binary (no Python
 required). On first use, fetch it with:
 
 ```bash
-curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/download/v0.5.9/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
-curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/download/v0.5.9/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/download/v0.5.10/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')"
+curl -fLO "https://github.com/0xkey-io/enclave-keyops-skills/releases/download/v0.5.10/keyops.$(uname -s | tr A-Z a-z)-$(uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/').sha256"
 shasum -a 256 -c keyops.*.sha256
 install -m 0755 keyops.* ./bin/keyops   # or any directory on $PATH
-keyops require-version 0.5.9           # fail-loud if binary doesn't match this skill
+keyops require-version 0.5.10           # fail-loud if binary doesn't match this skill
 ```
 
 `keyops init --role share-set-member ...` auto-fetches the latest stable `qos_client` from `0xkey-io/qos` GitHub
@@ -141,7 +141,7 @@ member to execute a `linux/amd64` release binary directly.
 
 ## Version & update
 
-This skill is version `0.5.9` (see the frontmatter at the top of this
+This skill is version `0.5.10` (see the frontmatter at the top of this
 file). Release notes and migration steps are in
 [references/release-notes.md](references/release-notes.md). Always read
 the entry for the version you are upgrading **into** before running any
@@ -158,8 +158,8 @@ After upgrading the skill, update the `keyops` binary to the matching version
 and verify:
 
 ```bash
-keyops fetch-keyops --release-tag v0.5.9
-keyops require-version 0.5.9
+keyops fetch-keyops --release-tag v0.5.10
+keyops require-version 0.5.10
 ```
 
 ## Runbook

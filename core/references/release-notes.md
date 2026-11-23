@@ -32,7 +32,7 @@ step before re-running ceremony commands.
 
 ---
 
-## Unreleased
+## 0.5.10 — 2026-11-23
 
 Make follow-up ceremonies (pivot / qOS upgrade on an existing quorum key)
 runnable end-to-end through `keyops`, with an offline gate before the review
@@ -69,6 +69,10 @@ bundle. No migration needed; existing configs keep working.
   `waiting-for-manifest-check` states.
 - Workspace rules: per-ceremony workdirs; `workspace seed` is the only
   sanctioned way to reuse a previous ceremony's public material.
+- Manifest Set runbook: `approve-manifest` does not display the manifest
+  hash. Members now recompute it locally (`qos_client json-to-borsh` +
+  `shasum -a 256`) from the exact file they approve and compare it with the
+  Coordinator's hash table received over a separate channel.
 
 ---
 
