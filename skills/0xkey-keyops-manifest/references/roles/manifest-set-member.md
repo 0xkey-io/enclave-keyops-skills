@@ -304,6 +304,26 @@ Before approving, summarize for the user:
 - PCR3 preimage role ARN basename/account
 - `qos-release/nitro.pcrs` SHA256 if present
 - pivot hash file names and SHA256
+- manifest hash per service, computed locally from the exact file that will
+  be approved, and compared with the hash table the Coordinator sent through a
+  channel other than the one that carried the bundle:
+
+  ```bash
+  T=$(mktemp -d)
+  for svc in signer policy-engine notarizer tls-fetcher transaction-parser; do
+    "$WORKDIR/shared/qos_client" json-to-borsh --display-type manifest \
+      --file-path "$WORKDIR/manifest/$svc-manifest.json" \
+      --output-path "$T/$svc.borsh"
+    shasum -a 256 "$T/$svc.borsh"
+  done
+  ```
+
+`approve-manifest` does not display the manifest hash. It asks the signer to
+confirm namespace, nonce, restart policy and pivot args (y/n), checks sets,
+PCRs, pivot hash and quorum key against the local files, then signs the hash.
+The local hash comparison above is therefore the only point where a signer
+binds their approval to the exact manifest the Coordinator announced. Any
+mismatch is a stop: do not approve, report it to the Coordinator.
 
 Ask for explicit approval. Do not use `--unsafe-auto-confirm` unless the user
 explicitly says this is non-production/test and wants non-interactive approval.
